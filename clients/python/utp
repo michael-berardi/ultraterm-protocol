@@ -6,17 +6,22 @@ Control socket for UltraTerm terminals and universal OMP profile management.
 Speaks JSON Lines to ~/.ultraterm/utp.sock.
 
 Usage:
-  utp list                              # all attached terminals
+  utp list                              # read-only attached-terminal inventory
   utp inspect --slot 2 [--lines 80] [--raw]
-  utp send --slot 2 "ls -la"            # queues text + Enter
+                                        # read-only recent PTY history, not screen state
+  utp send --slot 2 "ls -la"            # target PTY input + Enter
   utp message --from 1 --to 2 "tests are green"
+                                        # neutral addressed notice, no PTY input
   utp open --profile NAME [--title s] [--confirm]
-                                        # start a session; without --confirm
-                                        # prints what it WOULD do and exits 0
-  utp close --slot N [--confirm]        # gracefully close a session; same guard
-  utp register-manager --slot N [--from N]
+                                        # lowest free slot; dry-run by default
+  utp close --slot N [--expected-id ID] [--confirm]
+                                        # target slot only; dry-run binds ID
+  utp switch-profile PROFILE [--slot N] [--expected-id ID] [--confirm]
+                                        # target replacement; dry-run binds ID
+  utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET
+                                        # dry-run; confirmation requires user permission
+  utp report --route ROUTE --project NAME --summary TEXT --verification TEXT --rollback TEXT
   utp task-done --summary TEXT [--from N] [--to N]
-  utp report --project NAME --summary TEXT --verification TEXT --rollback TEXT
   utp profiles list
   utp profiles create NAME MODEL THINKING [--title-model MODEL]
   utp profiles remove NAME
@@ -30,11 +35,13 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 
 SOCKET_PATH = os.path.expanduser("~/.ultraterm/utp.sock")
 REPORT_HOOK_PATH = os.path.expanduser(
     os.environ.get("UTP_REPORT_HOOK", "~/.ultraterm/report-hook")
 )
+ROUTE_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
@@ -119,14 +126,97 @@ def caller_slot(explicit, command: str) -> int:
         )
     return slot
 
+def optional_caller_slot() -> int | None:
+    value = os.environ.get("ULTRATERM_SLOT")
+    try:
+        slot = int(value or "")
+    except ValueError:
+        return None
+    return slot if slot > 0 else None
+
+def handoff_packet_path(value: str) -> str:
+    path = os.path.abspath(value)
+    root = os.path.realpath("/tmp")
+    resolved = os.path.realpath(path)
+    try:
+        common = os.path.commonpath((resolved, root))
+    except ValueError:
+        common = ""
+    if common != root:
+        raise SystemExit("utp handoff: packet must resolve to a file under /tmp")
+    try:
+        details = os.lstat(path)
+    except FileNotFoundError:
+        raise SystemExit(f"utp handoff: packet not found at {path}") from None
+    if not stat.S_ISREG(details.st_mode) or stat.S_ISLNK(details.st_mode):
+        raise SystemExit("utp handoff: packet must be a regular file, not a symlink")
+    if details.st_uid != os.getuid():
+        raise SystemExit("utp handoff: packet must be owned by the current user")
+    if details.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise SystemExit("utp handoff: packet must be private (chmod 600)")
+    if details.st_size <= 0 or details.st_size > 16 * 1024:
+        raise SystemExit("utp handoff: packet must contain 1-16384 bytes")
+    return resolved
+
+
+def wait_for_terminal_ready(slot: int) -> None:
+    output_seen = False
+    for _ in range(60):
+        response = call({"cmd": "inspect", "slot": slot, "lines": 30, "raw": False})
+        if response.get("ok") and response.get("text", "").strip():
+            if output_seen:
+                time.sleep(0.75)
+                return
+            output_seen = True
+        time.sleep(0.5)
+    raise SystemExit(
+        f"utp handoff: Terminal {slot} did not produce stable output within 30 seconds; "
+        "packet was not submitted"
+    )
+
+
+def submit_handoff(slot: int, packet: str) -> None:
+    wait_for_terminal_ready(slot)
+    prompt = (
+        f"Read the authoritative handoff packet at {packet}. Continue every remaining "
+        "todo without repeating completed work. Reuse its resources and artifacts, "
+        "preserve its constraints and decisions, and verify before reporting."
+    )
+    response = call({"cmd": "send", "slot": slot, "text": prompt, "enter": True})
+    print_error(response)
+
+
+def cleanup_opened_handoff(session: dict) -> None:
+    response = call({
+        "cmd": "close",
+        "slot": session["slot"],
+        "expectedId": session["id"],
+        "confirm": True,
+    })
+    if not response.get("ok"):
+        print(
+            f"utp handoff: cleanup failed for slot {session['slot']}: "
+            f"{response.get('error', 'request failed')}",
+            file=sys.stderr,
+        )
+
 
 def run_report_hook(args: argparse.Namespace) -> None:
+    if not args.user_authorized:
+        raise SystemExit(
+            "utp report: --user-authorized is required after explicit user permission"
+        )
+    if not ROUTE_RE.fullmatch(args.route):
+        raise SystemExit(
+            "utp report: route must use lowercase letters, numbers, dots, colons, underscores, or hyphens"
+        )
     if not PROJECT_RE.fullmatch(args.project):
         raise SystemExit("utp report: project must use lowercase letters, numbers, and hyphens")
     payload = {
         "project": args.project,
         "summary": args.summary.strip(),
         "verification": args.verification.strip(),
+        "route": args.route,
         "rollback": args.rollback.strip(),
     }
     for name in ("summary", "verification", "rollback"):
@@ -180,12 +270,44 @@ def main() -> None:
     open.add_argument("--confirm", action="store_true",
                       help="actually create the session (default: dry run)")
 
+    switch_profile = sub.add_parser(
+        "switch-profile",
+        help="replace an existing terminal's OMP profile in place",
+    )
+    switch_profile.add_argument("profile", help="OMP profile to launch")
+    switch_profile.add_argument("--slot", type=int, help="terminal slot; defaults to ULTRATERM_SLOT")
+    switch_profile.add_argument("--confirm", action="store_true",
+                                help="actually switch the profile (default: dry run)")
+    switch_profile.add_argument("--expected-id",
+                                help="session id printed by the matching dry run")
+
+    handoff = sub.add_parser(
+        "handoff",
+        help="transfer a compact context packet to a replacement or new worker",
+    )
+    handoff.add_argument("--profile", required=True, help="OMP profile for the receiving worker")
+    target = handoff.add_mutually_exclusive_group(required=True)
+    target.add_argument("--slot", type=int, help="replace the worker in this slot")
+    target.add_argument("--new-slot", action="store_true", help="open the lowest free worker slot")
+    handoff.add_argument("--packet", required=True, help="private handoff Markdown under /tmp")
+    handoff.add_argument("--title", help="title for a new worker slot")
+    handoff.add_argument("--manager-slot", type=int, required=True, help="manager to register for the receiving worker")
+    handoff.add_argument("--expected-id", help="session id printed by an in-place dry run")
+    handoff.add_argument("--confirm", action="store_true", help="perform the handoff")
+    handoff.add_argument(
+        "--user-authorized",
+        action="store_true",
+        help="assert that the user explicitly authorized terminal orchestration",
+    )
+
     close = sub.add_parser("close", help="gracefully close a terminal session")
     close.add_argument("--slot", type=int, required=True)
     close.add_argument("--confirm", action="store_true",
                        help="actually close the session (default: dry run)")
+    close.add_argument("--expected-id",
+                       help="session id printed by the matching dry run")
     message = sub.add_parser("message", help="show an addressed message banner on another terminal")
-    message.add_argument("--from", dest="from_slot", type=int, required=True)
+    message.add_argument("--from", dest="from_slot", type=int, help="sender slot; defaults to ULTRATERM_SLOT")
     message.add_argument("--to", type=int, required=True)
     message.add_argument("text")
 
@@ -206,6 +328,12 @@ def main() -> None:
     report.add_argument("--summary", required=True)
     report.add_argument("--verification", required=True)
     report.add_argument("--rollback", required=True)
+    report.add_argument("--route", required=True, help="user-owned local route alias")
+    report.add_argument(
+        "--user-authorized",
+        action="store_true",
+        help="assert that the user explicitly authorized external delivery",
+    )
     add_profile_commands(sub)
 
     args = parser.parse_args()
@@ -265,6 +393,113 @@ def main() -> None:
         print_error(call(request))
         return
 
+    if args.cmd == "handoff":
+        packet = handoff_packet_path(args.packet)
+        if args.confirm and not args.user_authorized:
+            sys.exit(
+                "utp handoff: --confirm requires --user-authorized after explicit user permission"
+            )
+        caller = optional_caller_slot()
+        if not args.new_slot and args.manager_slot == args.slot:
+            sys.exit("utp handoff: a worker cannot be its own manager")
+        if args.confirm and not args.new_slot and caller == args.slot:
+            sys.exit(
+                "utp handoff: in-place handoff must run from its manager or an external shell "
+                "so the sender survives the replacement"
+            )
+        if args.confirm and caller is not None and caller != args.manager_slot:
+            sys.exit("utp handoff: the calling terminal must match --manager-slot")
+        inventory = call({"cmd": "list"})
+        print_error(inventory)
+        sessions_by_slot = {
+            session["slot"]: session for session in inventory.get("sessions", [])
+        }
+        if args.manager_slot not in sessions_by_slot:
+            sys.exit(f"utp handoff: no live manager on slot {args.manager_slot}")
+
+        if args.new_slot:
+            request = {"cmd": "open", "profile": args.profile, "confirm": args.confirm}
+            if args.title:
+                request["title"] = args.title
+            response = call(request)
+            print_error(response)
+            if not args.confirm:
+                would = response.get("would", {})
+                print(
+                    f"utp handoff: would open worker slot {would.get('slot')} with "
+                    f"OMP profile '{args.profile}' managed by slot {args.manager_slot}"
+                )
+                print(
+                    "Dry run only — re-run with --confirm --user-authorized "
+                    "after explicit user permission."
+                )
+                return
+            session = response["session"]
+            try:
+                registration = call({
+                    "cmd": "register.manager",
+                    "from": session["slot"],
+                    "to": args.manager_slot,
+                })
+                print_error(registration)
+                submit_handoff(session["slot"], packet)
+            except Exception:
+                cleanup_opened_handoff(session)
+                raise
+            target_slot = session["slot"]
+        else:
+            if args.confirm and not args.expected_id:
+                sys.exit(
+                    "utp handoff: in-place --confirm requires --expected-id from a fresh dry run"
+                )
+            if args.confirm:
+                current = sessions_by_slot.get(args.slot)
+                if current is None or current.get("id") != args.expected_id:
+                    found = current.get("id") if current else "no session"
+                    sys.exit(
+                        f"utp handoff: worker target changed before confirmation; "
+                        f"expected {args.expected_id}, found {found}; nothing was changed"
+                    )
+            if args.confirm:
+                registration = call({
+                    "cmd": "register.manager",
+                    "from": args.slot,
+                    "to": args.manager_slot,
+                })
+                print_error(registration)
+            request = {
+                "cmd": "profile.switch",
+                "slot": args.slot,
+                "profile": args.profile,
+                "confirm": args.confirm,
+            }
+            if args.expected_id:
+                request["expectedId"] = args.expected_id
+            response = call(request)
+            print_error(response)
+            if not args.confirm:
+                would = response.get("would", {})
+                expected_id = would.get("id")
+                if not expected_id:
+                    sys.exit(
+                        "utp handoff: running UltraTerm predates identity-bound "
+                        "confirmation; restart or update the app, then dry-run again"
+                    )
+                print(
+                    f"utp handoff: would replace worker slot {args.slot} ({expected_id}) "
+                    f"with OMP profile '{args.profile}' managed by slot {args.manager_slot}"
+                )
+                print(
+                    f"Dry run only — re-run with --confirm --user-authorized "
+                    f"--expected-id {expected_id} after explicit user permission."
+                )
+                return
+            target_slot = response["session"]["slot"]
+            submit_handoff(target_slot, packet)
+
+        print(f"handoff submitted to worker slot {target_slot}\t{packet}")
+        return
+
     if args.cmd == "open":
         request = {"cmd": "open", "profile": args.profile, "confirm": args.confirm}
         if args.title:
@@ -283,17 +518,57 @@ def main() -> None:
         print(f"opened slot {session['slot']}\t{session['id']}")
         return
 
-    if args.cmd == "close":
-        request = {"cmd": "close", "slot": args.slot, "confirm": args.confirm}
+    if args.cmd == "switch-profile":
+        slot = caller_slot(args.slot, args.cmd)
+        if args.confirm and not args.expected_id:
+            sys.exit("utp switch-profile: --confirm requires --expected-id from a fresh dry run")
+        request = {
+            "cmd": "profile.switch",
+            "slot": slot,
+            "profile": args.profile,
+            "confirm": args.confirm,
+        }
+        if args.expected_id:
+            request["expectedId"] = args.expected_id
         response = call(request)
         print_error(response)
         if not args.confirm:
             would = response.get("would", {})
+            expected_id = would.get("id")
+            if not expected_id:
+                sys.exit(
+                    "utp switch-profile: running UltraTerm predates identity-bound "
+                    "confirmation; restart or update the app, then dry-run again"
+                )
+            print(f"utp switch-profile: would replace slot {slot} ({expected_id}) with OMP profile '{args.profile}'")
+            print(
+                f"Dry run only — re-run with --confirm --expected-id {expected_id} "
+                "to switch that exact session."
+            )
+            return
+        session = response["session"]
+        print(f"switched slot {session['slot']} to {args.profile}\t{session['id']}")
+        return
+
+    if args.cmd == "close":
+        if args.confirm and not args.expected_id:
+            sys.exit("utp close: --confirm requires --expected-id from a fresh dry run")
+        request = {"cmd": "close", "slot": args.slot, "confirm": args.confirm}
+        if args.expected_id:
+            request["expectedId"] = args.expected_id
+        response = call(request)
+        print_error(response)
+        if not args.confirm:
+            would = response.get("would", {})
+            expected_id = would.get("id")
             print(
                 f"utp close: would gracefully close slot {would.get('slot')} "
-                f"({would.get('id')})"
+                f"({expected_id})"
             )
-            print("Dry run only — re-run with --confirm to close it.")
+            print(
+                f"Dry run only — re-run with --confirm --expected-id {expected_id} "
+                "to close that exact session."
+            )
             return
         closed = response["closed"]
         print(f"closed slot {closed['slot']}\t{closed['id']}")
@@ -322,7 +597,7 @@ def main() -> None:
         print(f"delivered to manager slot {response['deliveredTo']}")
         return
 
-    response = call({"cmd": "message", "from": args.from_slot, "to": args.to, "text": args.text})
+    response = call({"cmd": "message", "from": caller_slot(args.from_slot, args.cmd), "to": args.to, "text": args.text})
     print_error(response)
 
 

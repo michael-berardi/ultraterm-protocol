@@ -30,6 +30,8 @@ class ReportHookTests(unittest.TestCase):
             [
                 str(CLIENT),
                 "report",
+                "--route",
+                "felix:sample-group",
                 "--project",
                 "sample-product",
                 "--summary",
@@ -38,6 +40,7 @@ class ReportHookTests(unittest.TestCase):
                 "The focused workflow passed.",
                 "--rollback",
                 "Restore the previous verified build.",
+                "--user-authorized",
             ],
             env={
                 **os.environ,
@@ -58,9 +61,35 @@ class ReportHookTests(unittest.TestCase):
                 "project": "sample-product",
                 "summary": "The feature is available.",
                 "verification": "The focused workflow passed.",
+                "route": "felix:sample-group",
                 "rollback": "Restore the previous verified build.",
             },
         )
+
+    def test_requires_explicit_delivery_authorization(self):
+        result = subprocess.run(
+            [
+                str(CLIENT),
+                "report",
+                "--route",
+                "telegram:sample-group",
+                "--project",
+                "sample-product",
+                "--summary",
+                "Done.",
+                "--verification",
+                "Verified.",
+                "--rollback",
+                "Revert.",
+            ],
+            env={**os.environ, "UTP_REPORT_HOOK": str(self.hook)},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--user-authorized", result.stderr)
+        self.assertFalse(self.output.exists())
 
     def test_rejects_group_writable_hook(self):
         self.hook.chmod(0o720)

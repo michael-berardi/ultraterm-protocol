@@ -1,10 +1,8 @@
 # UltraTerm Terminal Protocol
 
-UltraTerm Terminal Protocol (UTP) lets local agents inspect and control persistent terminal sessions without GUI automation. Agents can address a stable terminal slot, read recent output, send input, delegate work, and report completion through one same-user Unix socket.
+UltraTerm Terminal Protocol (UTP) lets local agents inspect and control persistent terminal slots, hand work between profiles and workers, coordinate managers with multiple workers, and send authorized friendly reports through one same-user local interface.
 
 ## Install the reference client
-
-From this repository:
 
 ```sh
 mkdir -p "$HOME/.ultraterm/bin"
@@ -13,153 +11,83 @@ ln -sfn "$(pwd)/clients/python/utp" "$HOME/.ultraterm/bin/utp"
 export PATH="$HOME/.ultraterm/bin:$PATH"
 ```
 
-UltraTerm vendors this stdlib-only Python client. UltraTerm must be running before the client can connect.
+UltraTerm vendors this stdlib-only Python client. UltraTerm must be running for socket commands.
 
-## Protocol v1
+## Protocol v2
 
-UTP v1 uses JSON Lines over `~/.ultraterm/utp.sock`. The directory is mode `0700`; the socket is mode `0600`. Each UTF-8 line contains one JSON request object and receives one JSON response object. The transport is a Unix domain socket only. It is never TCP.
+UTP v2 uses JSON Lines over `~/.ultraterm/utp.sock`. The directory is mode `0700`; the socket is mode `0600`; there is no TCP listener. Every success contains `"ok":true`; every failure contains `"ok":false` and a human-readable `error`.
 
-All successful responses contain `"ok":true`. All failures use this shape:
+The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.md`](protocols/v1.md) remains the immutable 1.0 contract.
 
-```json
-{"ok":false,"error":"human-readable error"}
+| Client command | Behavior |
+|---|---|
+| `utp list` | Read-only attached slot/session inventory. |
+| `utp inspect --slot N` | Read-only bounded PTY history, not reconstructed screen state. |
+| `utp send --slot N TEXT` | Explicit low-level PTY input. |
+| `utp message --to N TEXT` | Neutral addressed notice; no prompt input or broadcast. |
+| `utp open --profile P` | Dry-run the lowest-free-slot assignment; confirmation attaches its pane. |
+| `utp close --slot N` | Dry-run an exact slot removal; confirmation requires the printed session ID. |
+| `utp switch-profile P --slot N` | Dry-run an identity-bound in-place profile handoff. |
+| `utp register-manager --slot M --from W` | Register worker W to manager M; many workers may share one manager. |
+| `utp task-done --from W --summary TEXT` | Deliver worker completion to its manager notice and PTY. |
+| `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
+| `utp profiles ...` | Root-confined universal OMP profile management. |
+| `utp report ...` | One authorized friendly report through a private local route hook. |
+
+## Identity-bound slot lifecycle
+
+Destructive commands are dry-run by default. The dry run returns the current session ID; confirmation must bind to it:
+
+```sh
+utp close --slot 3
+utp close --slot 3 --expected-id SESSION_ID --confirm
+
+utp switch-profile quality --slot 3
+utp switch-profile quality --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The normative requirements and limits are in [`protocols/v1.md`](protocols/v1.md).
+A reused slot or stale ID is rejected without changing the current terminal. Confirmed `open` assigns and attaches a slot. Confirmed `close` removes that exact slot and pane. Profile switching preserves slot, cwd, title, and dimensions, attaches the replacement before its startup health check, and repaints every live pane through the same appearance-refresh path used by theme changes.
 
-### `list`
+## Universal handoff
 
-```json
-{"cmd":"list"}
-{"ok":true,"sessions":[{"id":"SESSION_UUID","slot":1,"title":"Terminal 1","pid":12345,"launchedOmp":true,"launchProfile":"PROFILE_NAME"}]}
+Create one private packet under `/tmp`, `chmod 600` it, and keep it at or below 16 KiB. Include: Goal; Current state; Completed; every Remaining todo; Decisions and constraints; Resources and artifacts; Next action. Exclude credentials and obsolete transcript history.
+
+Same-slot handoff dry run:
+
+```sh
+utp handoff --slot 3 --profile quality --packet /tmp/handoff.md --manager-slot 1
 ```
 
-`launchProfile` is a string or `null`.
+New managed worker dry run:
 
-### `inspect`
-
-Select by `id` or `slot`. `lines` defaults to `80` and is capped at `1000`; `raw` defaults to `false`.
-
-```json
-{"cmd":"inspect","slot":2,"lines":80,"raw":false}
-{"ok":true,"id":"SESSION_UUID","text":"recent terminal output"}
+```sh
+utp handoff --new-slot --profile quality --packet /tmp/handoff.md --manager-slot 1
 ```
 
-### `send`
+After the user explicitly approves the exact plan, repeat with `--confirm --user-authorized`; same-slot handoff also requires the printed `--expected-id`. The client waits for the receiving OMP session, then submits a short instruction pointing to the packet. One manager may repeat this flow for multiple independent workers.
 
-Select by `id` or `slot`. `enter` defaults to `true` and appends carriage return for terminal submission.
+Agents may suggest a handoff or an additional worker when a dry run reports free capacity and observed system memory is comfortable. They must never infer permission to open, close, replace, or hand off a terminal.
 
-```json
-{"cmd":"send","slot":2,"text":"run the focused test","enter":true}
-{"ok":true,"id":"SESSION_UUID"}
-```
+## Universal friendly reports
 
-### `message`
-
-Messages are addressed banners, never broadcasts. `text` is limited to 4,000 Unicode characters.
-
-```json
-{"cmd":"message","from":1,"to":2,"text":"Tests are green."}
-{"ok":true}
-```
-
-### `open`
-
-`confirm` defaults to `false`. A dry run allocates nothing and reports the lowest free slot from 1 through 8.
-
-```json
-{"cmd":"open","profile":"PROFILE_NAME","title":"Worker","confirm":false}
-{"ok":true,"confirmed":false,"would":{"slot":2,"profile":"PROFILE_NAME","title":"Worker"}}
-```
-
-A confirmed request returns the created session:
-
-```json
-{"cmd":"open","profile":"PROFILE_NAME","title":"Worker","confirm":true}
-{"ok":true,"confirmed":true,"session":{"id":"SESSION_UUID","slot":2,"title":"Worker","pid":12345,"launchedOmp":true,"launchProfile":"PROFILE_NAME"}}
-```
-
-### `close`
-
-`confirm` defaults to `false` and the target is selected by `slot`.
-
-```json
-{"cmd":"close","slot":2,"confirm":false}
-{"ok":true,"confirmed":false,"would":{"slot":2,"id":"SESSION_UUID"}}
-```
-
-A confirmed request returns:
-
-```json
-{"cmd":"close","slot":2,"confirm":true}
-{"ok":true,"confirmed":true,"closed":{"slot":2,"id":"SESSION_UUID"}}
-```
-
-### `register-manager`
-
-The CLI command `register-manager` sends the wire command `register.manager`. `from` is the worker slot, normally read from `ULTRATERM_SLOT`; `to` is the manager slot.
-
-```json
-{"cmd":"register.manager","from":2,"to":1}
-{"ok":true,"from":2,"managerSlot":1}
-```
-
-### `task-done`
-
-The CLI command `task-done` sends the wire command `task.done`. `to` is optional when the worker has registered a manager. The server trims `text`, types it into the manager PTY with Enter, and emits an addressed banner.
-
-```json
-{"cmd":"task.done","from":2,"text":"Regression suite passed."}
-{"ok":true,"deliveredTo":1,"typedIntoPty":true}
-```
-
-An explicit manager override uses:
-
-```json
-{"cmd":"task.done","from":2,"to":3,"text":"Regression suite passed."}
-{"ok":true,"deliveredTo":3,"typedIntoPty":true}
-```
-
-## Local report hooks
-
-`utp report` sends a structured project report to a user-installed local hook:
+`utp report` is the single-call path for user-requested Felix, Telegram, bot, group, or generic reports:
 
 ```sh
 utp report \
-  --project sample-product \
-  --summary "The feature is available." \
-  --verification "The focused workflow passed." \
-  --rollback "Restore the previous verified build."
+  --route felix:group-alias \
+  --project project-name \
+  --summary "Friendly one-line result." \
+  --verification "Exact proof observed." \
+  --rollback "Concrete rollback path." \
+  --user-authorized
 ```
 
-The hook defaults to `~/.ultraterm/report-hook`; `UTP_REPORT_HOOK` may select a
-different path. The client requires the hook and its containing directory to
-be owned by the current user. The directory must be private; the hook must be
-a regular executable file that is not group/world writable.
-
-`report` is a local CLI extension, not a UTP v1 wire command. It never sends
-credentials or report content through the UltraTerm socket. The hook owns any
-external authentication and delivery behavior.
-
-## Agent onboarding
-
-```sh
-export PATH="$HOME/.ultraterm/bin:$PATH"
-export ULTRATERM_SLOT=2
-utp list
-utp register-manager --slot 1
-utp inspect --slot 1 --lines 40
-utp task-done --summary "Onboarding complete."
-```
-
-Use [`examples/manager-delegate.sh`](examples/manager-delegate.sh) and [`examples/worker-complete.sh`](examples/worker-complete.sh) as complete shell examples.
+The route is a local alias. A user-owned hook holds chat IDs, bot tokens, provider authentication, formatting, and delivery logic outside UTP. After verified work, send once through UTP; do not duplicate the message through a browser or provider API.
 
 ## Security
 
-UTP can write directly to terminal PTYs. Exposing that capability over TCP would turn a local convenience interface into a remote command-execution boundary requiring authentication, encryption, authorization, replay protection, and network hardening. UTP intentionally has none of those network features.
-
-Implementations must use the same-user Unix socket, enforce `0700` on `~/.ultraterm`, enforce `0600` on `utp.sock`, and never bind, proxy, or forward UTP over TCP. Keep credentials in the user's environment or keychain; never place them in protocol messages, examples, issues, or commits.
+UTP is command-capable. Servers must enforce the same-user Unix socket, directory mode `0700`, socket mode `0600`, bounded inputs, root-confined profile operations, identity-bound destructive confirmation, and symlink-safe private handoff packets. Never expose, proxy, or forward UTP over a network. Never place credentials, destination IDs, or private customer data in protocol traffic, examples, logs, fixtures, issues, or commits.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Protocol changes must preserve the v1 wire contract or ship under a new version.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). V1 remains frozen; generalized identity-bound orchestration is versioned as v2.
