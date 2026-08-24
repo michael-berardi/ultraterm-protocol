@@ -3,8 +3,16 @@ set -eu
 
 MANAGER_SLOT=${MANAGER_SLOT:-1}
 WORKER_SLOT=${WORKER_SLOT:-2}
-TASK=${1:-"Run the focused regression suite and report the exact totals."}
+PROFILE=${PROFILE:-quality}
+PACKET=${1:-/tmp/ultraterm-handoff.md}
 
-# The message is an addressed visual cue; send types the task into the worker PTY.
-utp message --from "$MANAGER_SLOT" --to "$WORKER_SLOT" "$TASK"
-utp send --slot "$WORKER_SLOT" "$TASK"
+test -f "$PACKET"
+chmod 600 "$PACKET"
+
+# Safe suggestion only. After explicit user approval, repeat the printed plan
+# with --confirm --user-authorized and its exact --expected-id.
+utp handoff \
+  --slot "$WORKER_SLOT" \
+  --profile "$PROFILE" \
+  --packet "$PACKET" \
+  --manager-slot "$MANAGER_SLOT"

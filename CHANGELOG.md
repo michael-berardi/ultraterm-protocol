@@ -1,35 +1,41 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-24
+
 ### Added
 
-- `utp report` invokes a secure, user-owned local hook with a structured
-  project summary, verification evidence, and rollback path.
+- Identity-bound `profile.switch` handoff with startup rollback and distinct successful, restored, and unrecoverable UI outcomes.
+- Universal `utp handoff` composition for same-slot replacement or a new managed worker.
+- Private, symlink-safe, current-user-owned handoff packets under `/tmp`, capped at 16 KiB.
+- Many-workers-to-one-manager orchestration through persistent manager registration.
+- Universal `utp report --route` aliases for Felix, Telegram, bot, group, local-inbox, and generic user-owned hooks.
+
+### Changed
+- Existing universal profile list/create/remove commands are now part of the normative v2 specification.
+
+- Confirmed `close` and in-place `switch-profile`/`handoff` now require the session ID printed by a fresh dry run.
+- Confirmed `open` attaches the assigned slot and pane; confirmed `close` removes that exact slot and pane.
+- Profile handoff attaches the replacement before its startup health check and repaints every live pane through the normal theme appearance-refresh path.
+- Terminal orchestration and external reporting require explicit user authorization. Agents may suggest capacity-aware orchestration but cannot confirm it autonomously.
 
 ### Security
 
-- Report hooks and their containing directories must be current-user-owned;
-  the directory must be private and the executable cannot be group/world
-  writable. Report payloads and credentials never cross the UTP socket.
-
+- Stale or reused slot identities are rejected under the mutation lock without changing the current session.
+- Handoff packets reject paths outside `/tmp`, symlinks, non-user ownership, non-private permissions, empty content, and oversized content.
+- Report routes are aliases; chat IDs, provider tokens, authentication, and delivery logic remain in a user-owned local hook.
 
 ## [1.0.0] - 2026-08-24
 
 ### Added
 
-- UltraTerm Terminal Protocol v1 using JSON Lines over the same-user Unix socket at `~/.ultraterm/utp.sock`.
-- `list`, `inspect`, `send`, and addressed `message` commands for persistent terminal discovery, output inspection, PTY input, and local coordination.
-- Guarded `open` and `close` commands with dry-run responses by default and explicit confirmation before session changes.
-- `register-manager` and `task-done` commands for worker-to-manager completion routing.
-- Persistent worker-to-manager mappings stored in `~/.ultraterm/manager-map.json` across app restarts.
-- Stdlib-only Python reference client plus manager-delegation and worker-completion shell examples.
+- JSON Lines protocol over the same-user Unix socket at `~/.ultraterm/utp.sock`.
+- `list`, `inspect`, `send`, addressed `message`, guarded `open`/`close`, `register-manager`, and `task-done`.
+- Persistent worker-to-manager mappings and a stdlib-only Python reference client.
 
 ### Security
 
-- Same-user local transport only: directory mode `0700`, socket mode `0600`, and no TCP listener.
-- Bounded request, message, inspection, and PTY-output buffers.
+- Directory mode `0700`, socket mode `0600`, no TCP listener, and bounded request/message/output buffers.
