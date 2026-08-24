@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+# canonical home; UltraTerm vendors this
+"""utp — UltraTerm Protocol CLI.
+
+Control socket for UltraTerm terminals and universal OMP profile management.
+Speaks JSON Lines to ~/.ultraterm/utp.sock.
+
+Usage:
+  utp list                              # all attached terminals
+  utp inspect --slot 2 [--lines 80] [--raw]
+  utp send --slot 2 "ls -la"            # queues text + Enter
+  utp message --from 1 --to 2 "tests are green"
+  utp open --profile NAME [--title s] [--confirm]
+                                        # start a session; without --confirm
+                                        # prints what it WOULD do and exits 0
+  utp close --slot N [--confirm]        # gracefully close a session; same guard
+  utp register-manager --slot N [--from N]
+  utp task-done --summary TEXT [--from N] [--to N]
+  utp profiles list
+  utp profiles create NAME MODEL THINKING [--title-model MODEL]
+  utp profiles remove NAME
+"""
+
+import argparse
+import json
+import os
+import socket
+import sys
+
+SOCKET_PATH = os.path.expanduser("~/.ultraterm/utp.sock")
+
+
+def call(request: dict) -> dict:
+    if not os.path.exists(SOCKET_PATH):
+        sys.exit(f"utp: UltraTerm control socket not found at {SOCKET_PATH} (is UltraTerm running?)")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(10)
+        sock.connect(SOCKET_PATH)
+        sock.sendall(json.dumps(request).encode() + b"\n")
+        chunks = []
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if b"\n" in chunk:
+                break
+    finally:
+        sock.close()
+    line = b"".join(chunks).split(b"\n", 1)[0]
+    if not line:
+        sys.exit("utp: empty response from UltraTerm")
+    return json.loads(line)
+
+
+def profile_create_request(args: argparse.Namespace) -> dict:
+    name = args.name or args.name_option
+    model = args.model or args.model_option
+    thinking = args.thinking or args.thinking_option
+    missing = [label for label, value in (("name", name), ("model", model), ("thinking", thinking)) if not value]
+    if missing:
+        raise SystemExit(f"utp profiles create: missing {', '.join(missing)}")
+    request = {
+        "cmd": "profiles.create",
+        "name": name,
+        "model": model,
+        "thinkingLevel": thinking,
+    }
+    title_model = args.title_model or args.title_model_option
+    if title_model:
+        request["titleModel"] = title_model
+    return request
+
+
+def add_profile_commands(sub: argparse._SubParsersAction) -> None:
+    profiles = sub.add_parser("profiles", help="manage OMP profiles")
+    profile_sub = profiles.add_subparsers(dest="profiles_cmd", required=True)
+    profile_sub.add_parser("list", help="list discovered OMP profiles")
+
+    create = profile_sub.add_parser("create", help="create an OMP profile")
+    create.add_argument("name", nargs="?")
+    create.add_argument("model", nargs="?")
+    create.add_argument("thinking", nargs="?")
+    create.add_argument("--name", dest="name_option")
+    create.add_argument("--model", dest="model_option")
+    create.add_argument("--thinking", dest="thinking_option")
+    create.add_argument("--title-model")
+    create.add_argument("--titleModel", dest="title_model_option")
+
+    remove = profile_sub.add_parser("remove", help="remove an inactive OMP profile")
+    remove.add_argument("name")
+
+
+def print_error(response: dict) -> None:
+    if not response.get("ok"):
+        sys.exit(f"utp: {response.get('error', 'request failed')}")
+
+
+def caller_slot(explicit, command: str) -> int:
+    if explicit is not None:
+        return explicit
+    value = os.environ.get("ULTRATERM_SLOT")
+    try:
+        slot = int(value or "")
+    except ValueError:
+        slot = 0
+    if slot <= 0:
+        raise SystemExit(
+            f"utp {command}: set ULTRATERM_SLOT or pass --from with the calling terminal slot"
+        )
+    return slot
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="utp",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list", help="list attached terminals")
+
+    inspect = sub.add_parser("inspect", help="show recent output of a terminal")
+    inspect.add_argument("--slot", type=int)
+    inspect.add_argument("--id")
+    inspect.add_argument("--lines", type=int, default=80)
+    inspect.add_argument("--raw", action="store_true")
+
+    send = sub.add_parser("send", help="send input to a terminal's PTY")
+    send.add_argument("--slot", type=int)
+    send.add_argument("--id")
+    send.add_argument("text")
+    send.add_argument("--no-enter", action="store_true")
+
+    open = sub.add_parser("open", help="start a new UltraTerm session")
+    open.add_argument("--profile", required=True, help="OMP profile to launch")
+    open.add_argument("--title", help="display title for the new terminal")
+    open.add_argument("--confirm", action="store_true",
+                      help="actually create the session (default: dry run)")
+
+    close = sub.add_parser("close", help="gracefully close a terminal session")
+    close.add_argument("--slot", type=int, required=True)
+    close.add_argument("--confirm", action="store_true",
+                       help="actually close the session (default: dry run)")
+    message = sub.add_parser("message", help="show an addressed message banner on another terminal")
+    message.add_argument("--from", dest="from_slot", type=int, required=True)
+    message.add_argument("--to", type=int, required=True)
+    message.add_argument("text")
+
+    register_manager = sub.add_parser(
+        "register-manager",
+        help="register this worker terminal's manager",
+    )
+    register_manager.add_argument("--slot", type=int, required=True, help="manager terminal slot")
+    register_manager.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
+
+    task_done = sub.add_parser("task-done", help="report completion to this worker's manager")
+    task_done.add_argument("--summary", required=True)
+    task_done.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
+    task_done.add_argument("--to", type=int, help="manager terminal slot override")
+    add_profile_commands(sub)
+
+    args = parser.parse_args()
+
+    if args.cmd == "list":
+        response = call({"cmd": "list"})
+        print_error(response)
+        for session in sorted(response["sessions"], key=lambda s: s["slot"]):
+            profile = session.get("launchProfile") or "Default OMP"
+            omp = "omp" if session.get("launchedOmp") else "shell"
+            print(f"{session['slot']}\t{session['title']}\t{omp}\t{profile}\t{session['id']}")
+        return
+
+    if args.cmd == "profiles":
+        if args.profiles_cmd == "list":
+            response = call({"cmd": "profiles.list"})
+            print_error(response)
+            for profile in response.get("profiles", []):
+                state = "active" if profile.get("active") else "inactive"
+                print(f"{profile['name']}\t{state}")
+            return
+        if args.profiles_cmd == "create":
+            response = call(profile_create_request(args))
+            print_error(response)
+            if response.get("profile"):
+                print(response["profile"]["name"])
+            return
+        response = call({"cmd": "profiles.remove", "name": args.name})
+        print_error(response)
+        return
+
+    if args.cmd == "inspect":
+        request = {"cmd": "inspect", "lines": args.lines, "raw": args.raw}
+        if args.slot is not None:
+            request["slot"] = args.slot
+        elif args.id:
+            request["id"] = args.id
+        else:
+            sys.exit("utp inspect: --slot or --id required")
+        response = call(request)
+        print_error(response)
+        print(response["text"])
+        return
+
+    if args.cmd == "send":
+        request = {"cmd": "send", "text": args.text, "enter": not args.no_enter}
+        if args.slot is not None:
+            request["slot"] = args.slot
+        elif args.id:
+            request["id"] = args.id
+        else:
+            sys.exit("utp send: --slot or --id required")
+        print_error(call(request))
+        return
+
+    if args.cmd == "open":
+        request = {"cmd": "open", "profile": args.profile, "confirm": args.confirm}
+        if args.title:
+            request["title"] = args.title
+        response = call(request)
+        print_error(response)
+        if not args.confirm:
+            would = response.get("would", {})
+            line = f"utp open: would start terminal slot {would.get('slot')} with OMP profile '{args.profile}'"
+            if would.get("title"):
+                line += f" titled '{would['title']}'"
+            print(line)
+            print("Dry run only — re-run with --confirm to create the session.")
+            return
+        session = response["session"]
+        print(f"opened slot {session['slot']}\t{session['id']}")
+        return
+
+    if args.cmd == "close":
+        request = {"cmd": "close", "slot": args.slot, "confirm": args.confirm}
+        response = call(request)
+        print_error(response)
+        if not args.confirm:
+            would = response.get("would", {})
+            print(
+                f"utp close: would gracefully close slot {would.get('slot')} "
+                f"({would.get('id')})"
+            )
+            print("Dry run only — re-run with --confirm to close it.")
+            return
+        closed = response["closed"]
+        print(f"closed slot {closed['slot']}\t{closed['id']}")
+        return
+
+    if args.cmd == "register-manager":
+        response = call({
+            "cmd": "register.manager",
+            "from": caller_slot(args.from_slot, args.cmd),
+            "to": args.slot,
+        })
+        print_error(response)
+        print(f"manager slot {response['managerSlot']} registered for worker slot {response['from']}")
+        return
+
+    if args.cmd == "task-done":
+        request = {
+            "cmd": "task.done",
+            "from": caller_slot(args.from_slot, args.cmd),
+            "text": args.summary,
+        }
+        if args.to is not None:
+            request["to"] = args.to
+        response = call(request)
+        print_error(response)
+        print(f"delivered to manager slot {response['deliveredTo']}")
+        return
+
+    response = call({"cmd": "message", "from": args.from_slot, "to": args.to, "text": args.text})
+    print_error(response)
+
+
+if __name__ == "__main__":
+    main()
