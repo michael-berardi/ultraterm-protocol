@@ -120,6 +120,27 @@ An explicit manager override uses:
 {"ok":true,"deliveredTo":3,"typedIntoPty":true}
 ```
 
+## Local report hooks
+
+`utp report` sends a structured project report to a user-installed local hook:
+
+```sh
+utp report \
+  --project sample-product \
+  --summary "The feature is available." \
+  --verification "The focused workflow passed." \
+  --rollback "Restore the previous verified build."
+```
+
+The hook defaults to `~/.ultraterm/report-hook`; `UTP_REPORT_HOOK` may select a
+different path. The client requires the hook and its containing directory to
+be owned by the current user. The directory must be private; the hook must be
+a regular executable file that is not group/world writable.
+
+`report` is a local CLI extension, not a UTP v1 wire command. It never sends
+credentials or report content through the UltraTerm socket. The hook owns any
+external authentication and delivery behavior.
+
 ## Agent onboarding
 
 ```sh

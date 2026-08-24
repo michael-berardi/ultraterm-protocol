@@ -16,6 +16,7 @@ Usage:
   utp close --slot N [--confirm]        # gracefully close a session; same guard
   utp register-manager --slot N [--from N]
   utp task-done --summary TEXT [--from N] [--to N]
+  utp report --project NAME --summary TEXT --verification TEXT --rollback TEXT
   utp profiles list
   utp profiles create NAME MODEL THINKING [--title-model MODEL]
   utp profiles remove NAME
@@ -24,10 +25,17 @@ Usage:
 import argparse
 import json
 import os
+import re
 import socket
+import stat
+import subprocess
 import sys
 
 SOCKET_PATH = os.path.expanduser("~/.ultraterm/utp.sock")
+REPORT_HOOK_PATH = os.path.expanduser(
+    os.environ.get("UTP_REPORT_HOOK", "~/.ultraterm/report-hook")
+)
+PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 def call(request: dict) -> dict:
@@ -112,6 +120,39 @@ def caller_slot(explicit, command: str) -> int:
     return slot
 
 
+def run_report_hook(args: argparse.Namespace) -> None:
+    if not PROJECT_RE.fullmatch(args.project):
+        raise SystemExit("utp report: project must use lowercase letters, numbers, and hyphens")
+    payload = {
+        "project": args.project,
+        "summary": args.summary.strip(),
+        "verification": args.verification.strip(),
+        "rollback": args.rollback.strip(),
+    }
+    for name in ("summary", "verification", "rollback"):
+        if not payload[name] or len(payload[name]) > 1200:
+            raise SystemExit(f"utp report: {name} must contain 1-1200 characters")
+
+    hook = os.path.realpath(REPORT_HOOK_PATH)
+    try:
+        details = os.stat(hook)
+    except FileNotFoundError:
+        raise SystemExit(
+            f"utp report: hook not found at {REPORT_HOOK_PATH}; install a user-owned executable hook"
+        ) from None
+    parent = os.stat(os.path.dirname(hook))
+    if parent.st_uid != os.getuid() or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise SystemExit("utp report: hook directory must be current-user-owned and private")
+    if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+        raise SystemExit("utp report: hook must be a regular file owned by the current user")
+    if details.st_mode & (stat.S_IWGRP | stat.S_IWOTH) or not os.access(hook, os.X_OK):
+        raise SystemExit("utp report: hook must be executable and not group/world writable")
+
+    result = subprocess.run([hook], input=json.dumps(payload), text=True, check=False)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="utp",
@@ -159,9 +200,19 @@ def main() -> None:
     task_done.add_argument("--summary", required=True)
     task_done.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
     task_done.add_argument("--to", type=int, help="manager terminal slot override")
+
+    report = sub.add_parser("report", help="send a verified report through a local user hook")
+    report.add_argument("--project", required=True)
+    report.add_argument("--summary", required=True)
+    report.add_argument("--verification", required=True)
+    report.add_argument("--rollback", required=True)
     add_profile_commands(sub)
 
     args = parser.parse_args()
+
+    if args.cmd == "report":
+        run_report_hook(args)
+        return
 
     if args.cmd == "list":
         response = call({"cmd": "list"})

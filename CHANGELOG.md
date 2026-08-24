@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `utp report` invokes a secure, user-owned local hook with a structured
+  project summary, verification evidence, and rollback path.
+
+### Security
+
+- Report hooks and their containing directories must be current-user-owned;
+  the directory must be private and the executable cannot be group/world
+  writable. Report payloads and credentials never cross the UTP socket.
+
+
 ## [1.0.0] - 2026-08-24
 
 ### Added
