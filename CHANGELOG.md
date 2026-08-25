@@ -4,6 +4,11 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
+### Added
+
+- `utp report --kind file|image --file PATH` delivers a single regular, non-empty file (up to 45 MiB) by resolved path; `--summary` becomes an optional caption (1-1024 characters) and `--verification`/`--rollback` become optional. The default `--kind report` is unchanged and rejects `--file`.
+- `utp redact --route ROUTE --project NAME --message-id N [...] --reason TEXT --user-authorized` deletes the bot's own prior messages by explicit ID only (1-20 positive IDs per call, deduplicated and sorted), with a fail-open audit entry written for every call.
+
 ## [2.0.0] - 2026-08-24
 
 ### Added

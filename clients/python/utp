@@ -21,6 +21,13 @@ Usage:
   utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET
                                         # dry-run; confirmation requires user permission
   utp report --route ROUTE --project NAME --summary TEXT --verification TEXT --rollback TEXT
+                                        # text report (default kind)
+  utp report --route ROUTE --project NAME --kind file --file /path/to.zip [--summary CAPTION]
+                                        # file-only document delivery
+  utp report --route ROUTE --project NAME --kind image --file /path/to.png [--summary CAPTION]
+                                        # image delivery
+  utp redact --route ROUTE --project NAME --message-id N [--message-id N ...] --reason TEXT
+                                        # delete the bot's own prior messages; explicit IDs only
   utp task-done --summary TEXT [--from N] [--to N]
   utp profiles list
   utp profiles create NAME MODEL THINKING [--title-model MODEL]
@@ -201,46 +208,95 @@ def cleanup_opened_handoff(session: dict) -> None:
         )
 
 
-def run_report_hook(args: argparse.Namespace) -> None:
-    if not args.user_authorized:
-        raise SystemExit(
-            "utp report: --user-authorized is required after explicit user permission"
-        )
-    if not ROUTE_RE.fullmatch(args.route):
-        raise SystemExit(
-            "utp report: route must use lowercase letters, numbers, dots, colons, underscores, or hyphens"
-        )
-    if not PROJECT_RE.fullmatch(args.project):
-        raise SystemExit("utp report: project must use lowercase letters, numbers, and hyphens")
-    payload = {
-        "project": args.project,
-        "summary": args.summary.strip(),
-        "verification": args.verification.strip(),
-        "route": args.route,
-        "rollback": args.rollback.strip(),
-    }
-    for name in ("summary", "verification", "rollback"):
-        if not payload[name] or len(payload[name]) > 1200:
-            raise SystemExit(f"utp report: {name} must contain 1-1200 characters")
-
+def run_hook(command: str, payload: dict) -> None:
     hook = os.path.realpath(REPORT_HOOK_PATH)
     try:
         details = os.stat(hook)
     except FileNotFoundError:
         raise SystemExit(
-            f"utp report: hook not found at {REPORT_HOOK_PATH}; install a user-owned executable hook"
+            f"utp {command}: hook not found at {REPORT_HOOK_PATH}; install a user-owned executable hook"
         ) from None
     parent = os.stat(os.path.dirname(hook))
     if parent.st_uid != os.getuid() or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise SystemExit("utp report: hook directory must be current-user-owned and private")
+        raise SystemExit(f"utp {command}: hook directory must be current-user-owned and private")
     if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
-        raise SystemExit("utp report: hook must be a regular file owned by the current user")
+        raise SystemExit(f"utp {command}: hook must be a regular file owned by the current user")
     if details.st_mode & (stat.S_IWGRP | stat.S_IWOTH) or not os.access(hook, os.X_OK):
-        raise SystemExit("utp report: hook must be executable and not group/world writable")
+        raise SystemExit(f"utp {command}: hook must be executable and not group/world writable")
 
     result = subprocess.run([hook], input=json.dumps(payload), text=True, check=False)
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+
+
+def validate_route_project(command: str, args: argparse.Namespace) -> None:
+    if not args.user_authorized:
+        raise SystemExit(
+            f"utp {command}: --user-authorized is required after explicit user permission"
+        )
+    if not ROUTE_RE.fullmatch(args.route):
+        raise SystemExit(
+            f"utp {command}: route must use lowercase letters, numbers, dots, colons, underscores, or hyphens"
+        )
+    if not PROJECT_RE.fullmatch(args.project):
+        raise SystemExit(f"utp {command}: project must use lowercase letters, numbers, and hyphens")
+
+
+def run_redact_hook(args: argparse.Namespace) -> None:
+    validate_route_project("redact", args)
+    ids = sorted(set(args.message_id))
+    if not ids or len(ids) > 20:
+        raise SystemExit("utp redact: provide 1-20 --message-id values")
+    if any(i <= 0 for i in ids):
+        raise SystemExit("utp redact: message IDs must be positive integers")
+    reason = (args.reason or "").strip()
+    if not reason or len(reason) > 300:
+        raise SystemExit("utp redact: --reason must contain 1-300 characters")
+    payload = {
+        "op": "redact",
+        "project": args.project,
+        "route": args.route,
+        "message_ids": ids,
+        "reason": reason,
+    }
+    run_hook("redact", payload)
+
+
+def run_report_hook(args: argparse.Namespace) -> None:
+    validate_route_project("report", args)
+    payload = {
+        "project": args.project,
+        "kind": args.kind,
+        "summary": (args.summary or "").strip(),
+        "verification": (args.verification or "").strip(),
+        "route": args.route,
+        "rollback": (args.rollback or "").strip(),
+    }
+    if args.kind == "report":
+        if args.file:
+            raise SystemExit("utp report: --file only applies to --kind file|image")
+        for name in ("summary", "verification", "rollback"):
+            if not payload[name] or len(payload[name]) > 1200:
+                raise SystemExit(f"utp report: {name} must contain 1-1200 characters")
+    else:
+        if not args.file:
+            raise SystemExit(f"utp report: --kind {args.kind} requires --file PATH")
+        if payload["summary"] and len(payload["summary"]) > 1024:
+            raise SystemExit("utp report: caption (--summary) must contain 1-1024 characters")
+        path = os.path.realpath(os.path.expanduser(args.file))
+        try:
+            info = os.stat(path)
+        except FileNotFoundError:
+            raise SystemExit(f"utp report: file not found: {args.file}") from None
+        if not stat.S_ISREG(info.st_mode):
+            raise SystemExit("utp report: --file must be a regular file")
+        if info.st_size == 0:
+            raise SystemExit("utp report: --file must not be empty")
+        if info.st_size > 45 * 1024 * 1024:
+            raise SystemExit("utp report: --file exceeds the 45 MiB delivery limit")
+        payload["file"] = path
+
+    run_hook("report", payload)
 
 
 def main() -> None:
@@ -325,14 +381,38 @@ def main() -> None:
 
     report = sub.add_parser("report", help="send a verified report through a local user hook")
     report.add_argument("--project", required=True)
-    report.add_argument("--summary", required=True)
-    report.add_argument("--verification", required=True)
-    report.add_argument("--rollback", required=True)
+    report.add_argument(
+        "--kind",
+        choices=("report", "file", "image"),
+        default="report",
+        help="delivery kind: text report (default), file-only document, or image",
+    )
+    report.add_argument("--file", help="file to deliver for --kind file|image")
+    report.add_argument("--summary", help="report text, or caption for file/image kinds")
+    report.add_argument("--verification")
+    report.add_argument("--rollback")
     report.add_argument("--route", required=True, help="user-owned local route alias")
     report.add_argument(
         "--user-authorized",
         action="store_true",
         help="assert that the user explicitly authorized external delivery",
+    )
+
+    redact = sub.add_parser("redact", help="delete the bot's own prior messages by explicit ID")
+    redact.add_argument("--project", required=True)
+    redact.add_argument("--route", required=True, help="user-owned local route alias")
+    redact.add_argument(
+        "--message-id",
+        type=int,
+        action="append",
+        required=True,
+        help="message ID to delete; repeat for multiple (max 20)",
+    )
+    redact.add_argument("--reason", required=True, help="why deletion is prudent (audit logged)")
+    redact.add_argument(
+        "--user-authorized",
+        action="store_true",
+        help="assert that the user explicitly authorized deletion",
     )
     add_profile_commands(sub)
 
@@ -340,6 +420,10 @@ def main() -> None:
 
     if args.cmd == "report":
         run_report_hook(args)
+        return
+
+    if args.cmd == "redact":
+        run_redact_hook(args)
         return
 
     if args.cmd == "list":
