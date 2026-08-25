@@ -32,7 +32,8 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | `utp task-done --from W --summary TEXT` | Deliver worker completion to its manager notice and PTY. |
 | `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
 | `utp profiles ...` | Root-confined universal OMP profile management. |
-| `utp report ...` | One authorized friendly report through a private local route hook. |
+| `utp report ...` | One authorized friendly text report, file, or image through a private local route hook. |
+| `utp redact ...` | Delete the bot's own prior messages by explicit ID through the same hook; audit-logged. |
 
 ## Identity-bound slot lifecycle
 
@@ -83,6 +84,38 @@ utp report \
 ```
 
 The route is a local alias. A user-owned hook holds chat IDs, bot tokens, provider authentication, formatting, and delivery logic outside UTP. After verified work, send once through UTP; do not duplicate the message through a browser or provider API.
+
+### Files and images
+
+`--kind report` (the default) sends the text report above. `--kind file` and `--kind image` deliver a single file instead:
+
+```sh
+utp report \
+  --route felix:group-alias \
+  --project project-name \
+  --kind file \
+  --file /path/to/archive.zip \
+  --summary "Optional caption." \
+  --user-authorized
+```
+
+`--kind file|image` requires `--file`: a regular, non-empty file up to 45 MiB, sent by its resolved path. `--summary` becomes an optional caption (up to 1024 characters); `--verification` and `--rollback` are optional. Passing `--file` with the default `--kind report` is rejected.
+
+### Redacting prior messages
+
+`utp redact` deletes the bot's own previously sent messages by explicit message ID:
+
+```sh
+utp redact \
+  --route felix:group-alias \
+  --project project-name \
+  --message-id 123 \
+  --message-id 124 \
+  --reason "Why deletion is prudent." \
+  --user-authorized
+```
+
+Redaction deletes only the bot's own messages, only by explicit `--message-id` (1-20 per call, duplicates removed), and requires `--user-authorized` plus a 1-300 character `--reason`. The hook resolves the chat, deletes each message independently so one failure does not stop the rest, and writes a fail-open audit entry for every call.
 
 ## Security
 
