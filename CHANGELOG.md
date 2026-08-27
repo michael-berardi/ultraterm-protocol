@@ -12,6 +12,10 @@ All notable changes are documented here. This project follows Keep a Changelog a
 ### Changed
 
 - Text reports now use repeatable `--new`, `--changed`, and `--fixed` items rendered as separate scannable sections. Paragraph summaries, verification chatter, deployment mechanics, commit identifiers, and rollback instructions are rejected as recipient-irrelevant noise.
+- The reference client now matches the installed UltraTerm client, including
+  provider-neutral profile routing and automatic caller-slot discovery inside
+  UltraTerm tmux sessions.
+- Public report-hook examples and fixtures use neutral route aliases.
 
 ## [2.0.0] - 2026-08-24
 
@@ -21,7 +25,7 @@ All notable changes are documented here. This project follows Keep a Changelog a
 - Universal `utp handoff` composition for same-slot replacement or a new managed worker.
 - Private, symlink-safe, current-user-owned handoff packets under `/tmp`, capped at 16 KiB.
 - Many-workers-to-one-manager orchestration through persistent manager registration.
-- Universal `utp report --route` aliases for Felix, Telegram, bot, group, local-inbox, and generic user-owned hooks.
+- Universal `utp report --route` aliases for chat bots, groups, local inboxes, and generic user-owned hooks.
 
 ### Changed
 - Existing universal profile list/create/remove commands are now part of the normative v2 specification.

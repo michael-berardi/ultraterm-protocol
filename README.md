@@ -4,14 +4,19 @@ UltraTerm Terminal Protocol (UTP) lets local agents inspect and control persiste
 
 ## Install the reference client
 
+UltraTerm installs and updates the client at `~/.ultraterm/bin/utp` during
+setup. Put that app-managed directory on your PATH:
+
 ```sh
-mkdir -p "$HOME/.ultraterm/bin"
-chmod +x clients/python/utp
-ln -sfn "$(pwd)/clients/python/utp" "$HOME/.ultraterm/bin/utp"
-export PATH="$HOME/.ultraterm/bin:$PATH"
+export PATH="$HOME/.ultraterm/bin:$PATH"  # add to your shell profile to persist
 ```
 
-UltraTerm vendors this stdlib-only Python client. UltraTerm must be running for socket commands.
+Do not overwrite the app-managed binary. To try the checked-in source client,
+link `clients/python/utp` under a different name or location such as
+`$HOME/.local/bin/utp-source`.
+
+UltraTerm must be running for socket commands. The checked-in stdlib-only
+Python client is the public reference source for the installed client.
 
 ## Protocol v2
 
@@ -31,9 +36,16 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | `utp register-manager --slot M --from W` | Register worker W to manager M; many workers may share one manager. |
 | `utp task-done --from W --summary TEXT` | Deliver worker completion to its manager notice and PTY. |
 | `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
-| `utp profiles ...` | Root-confined universal OMP profile management. |
+| `utp profiles ...` | List, create, or remove universal OMP profiles. |
 | `utp report ...` | One authorized friendly text report, file, or image through a private local route hook. |
 | `utp redact ...` | Delete the bot's own prior messages by explicit ID through the same hook; audit-logged. |
+
+Profile creation may include a provider-neutral ordered routing list:
+
+```sh
+utp profiles create quality provider/model high \
+  --routing upstream/primary,upstream/fallback
+```
 
 ## Identity-bound slot lifecycle
 
@@ -48,6 +60,10 @@ utp switch-profile quality --slot 3 --expected-id SESSION_ID --confirm
 ```
 
 A reused slot or stale ID is rejected without changing the current terminal. Confirmed `open` assigns and attaches a slot. Confirmed `close` removes that exact slot and pane. Profile switching preserves slot, cwd, title, and dimensions, attaches the replacement before its startup health check, and repaints every live pane through the same appearance-refresh path used by theme changes.
+
+Inside an UltraTerm tmux pane, the client discovers the caller slot from the
+session name. External shells can identify a caller explicitly with `--from`
+where that subcommand supports it.
 
 ## Universal handoff
 
@@ -65,7 +81,7 @@ New managed worker dry run:
 utp handoff --new-slot --profile quality --packet /tmp/handoff.md --manager-slot 1
 ```
 
-After the user explicitly approves the exact plan, repeat with `--confirm --user-authorized`; same-slot handoff also requires the printed `--expected-id`. The client waits for the receiving OMP session, then submits a short instruction pointing to the packet. One manager may repeat this flow for multiple independent workers.
+After the user explicitly approves the exact plan, repeat with `--confirm --user-authorized`; same-slot handoff also requires the printed `--expected-id`. A confirmed handoff must run from the manager terminal or an external non-UltraTerm shell. The client waits for the receiving OMP session, then submits a short instruction pointing to the packet. One manager may repeat this flow for multiple independent workers.
 
 Agents may suggest a handoff or an additional worker when a dry run reports free capacity and observed system memory is comfortable. They must never infer permission to open, close, replace, or hand off a terminal.
 
@@ -84,7 +100,7 @@ utp report \
   --user-authorized
 ```
 
-Each repeated flag becomes one bullet. The recipient sees only the non-empty `What's new`, `What's changed`, and `Fixes` sections. Text reports reject paragraphs, technical workflow details, verification chatter, deployment mechanics, commit identifiers, rollback instructions, and protected values. The route is a local alias; a user-owned hook keeps chat IDs, bot tokens, provider authentication, project labels, and delivery outside UTP.
+Each repeated flag becomes one bullet. The recipient sees only the non-empty `What's new`, `What's changed`, and `Fixes` sections. Text reports reject paragraphs, technical workflow details, verification chatter, deployment mechanics, commit identifiers, rollback instructions, and protected values. The route is a local alias; a user-owned hook keeps destination IDs, provider authentication, project labels, and delivery outside UTP. The client invokes the executable at `~/.ultraterm/report-hook` (override with `UTP_REPORT_HOOK`) and sends the JSON payload on standard input.
 
 ### Files and images
 
@@ -108,7 +124,7 @@ utp report \
 
 ```sh
 utp redact \
-  --route felix:group-alias \
+  --route team:group-alias \
   --project project-name \
   --message-id 123 \
   --message-id 124 \
