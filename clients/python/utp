@@ -20,8 +20,8 @@ Usage:
                                         # target replacement; dry-run binds ID
   utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET
                                         # dry-run; confirmation requires user permission
-  utp report --route ROUTE --project NAME --summary TEXT --verification TEXT --rollback TEXT
-                                        # text report (default kind)
+  utp report --route ROUTE --project NAME [--new ITEM] [--changed ITEM] [--fixed ITEM]
+                                        # structured text update; repeat flags for list items
   utp report --route ROUTE --project NAME --kind file --file /path/to.zip [--summary CAPTION]
                                         # file-only document delivery
   utp report --route ROUTE --project NAME --kind image --file /path/to.png [--summary CAPTION]
@@ -50,6 +50,39 @@ REPORT_HOOK_PATH = os.path.expanduser(
 )
 ROUTE_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+TECHNICAL_REPORT_NOISE_RE = re.compile(
+    r"(?i)\b(?:verified|verification|rollback|commit|sha|origin/main|"
+    r"deploy(?:ed|ment)?|tests?\s+passed|test suite|testing\s+(?:passed|completed)|pytest|vitest|eslint|typescript|"
+    r"cloudflare worker|(?:internal|build) workflow|version id)\b"
+)
+MAX_REPORT_ITEMS = 24
+MAX_SECTION_ITEMS = 12
+MAX_REPORT_ITEM_CHARS = 240
+
+
+def normalize_report_items(values: list[str], name: str) -> list[str]:
+    items = []
+    seen = set()
+    for raw in values:
+        text = raw.strip()
+        if "\n" in text or "\r" in text:
+            raise SystemExit(f"utp report: --{name} items must stay on a single line")
+        text = re.sub(r"^(?:[-*•]\s*)", "", text).strip()
+        if not text or len(text) > MAX_REPORT_ITEM_CHARS:
+            raise SystemExit(
+                f"utp report: --{name} items must contain 1-{MAX_REPORT_ITEM_CHARS} characters"
+            )
+        if TECHNICAL_REPORT_NOISE_RE.search(text):
+            raise SystemExit(f"utp report: --{name} contains technical workflow noise")
+        key = text.casefold()
+        if key not in seen:
+            seen.add(key)
+            items.append(text)
+    if len(items) > MAX_SECTION_ITEMS:
+        raise SystemExit(f"utp report: --{name} accepts at most {MAX_SECTION_ITEMS} items")
+    return items
+
+
 
 
 def call(request: dict) -> dict:
@@ -267,22 +300,29 @@ def run_report_hook(args: argparse.Namespace) -> None:
     payload = {
         "project": args.project,
         "kind": args.kind,
-        "summary": (args.summary or "").strip(),
-        "verification": (args.verification or "").strip(),
         "route": args.route,
-        "rollback": (args.rollback or "").strip(),
     }
     if args.kind == "report":
         if args.file:
             raise SystemExit("utp report: --file only applies to --kind file|image")
-        for name in ("summary", "verification", "rollback"):
-            if not payload[name] or len(payload[name]) > 1200:
-                raise SystemExit(f"utp report: {name} must contain 1-1200 characters")
+        if args.summary:
+            raise SystemExit("utp report: --summary only applies to --kind file|image")
+        new = normalize_report_items(args.new_items, "new")
+        changed = normalize_report_items(args.changed_items, "changed")
+        fixed = normalize_report_items(args.fixed_items, "fixed")
+        if not any((new, changed, fixed)):
+            raise SystemExit("utp report: provide at least one --new, --changed, or --fixed item")
+        if len(new) + len(changed) + len(fixed) > MAX_REPORT_ITEMS:
+            raise SystemExit(f"utp report: structured updates accept at most {MAX_REPORT_ITEMS} items")
+        payload.update({"new": new, "changed": changed, "fixed": fixed})
     else:
+        if any((args.new_items, args.changed_items, args.fixed_items)):
+            raise SystemExit("utp report: --new/--changed/--fixed only apply to text reports")
         if not args.file:
             raise SystemExit(f"utp report: --kind {args.kind} requires --file PATH")
-        if payload["summary"] and len(payload["summary"]) > 1024:
-            raise SystemExit("utp report: caption (--summary) must contain 1-1024 characters")
+        caption = (args.summary or "").strip()
+        if len(caption) > 1024:
+            raise SystemExit("utp report: caption (--summary) must contain at most 1024 characters")
         path = os.path.realpath(os.path.expanduser(args.file))
         try:
             info = os.stat(path)
@@ -294,7 +334,7 @@ def run_report_hook(args: argparse.Namespace) -> None:
             raise SystemExit("utp report: --file must not be empty")
         if info.st_size > 45 * 1024 * 1024:
             raise SystemExit("utp report: --file exceeds the 45 MiB delivery limit")
-        payload["file"] = path
+        payload.update({"summary": caption, "file": path})
 
     run_hook("report", payload)
 
@@ -379,18 +419,19 @@ def main() -> None:
     task_done.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
     task_done.add_argument("--to", type=int, help="manager terminal slot override")
 
-    report = sub.add_parser("report", help="send a verified report through a local user hook")
+    report = sub.add_parser("report", help="send a structured project update through a local user hook")
     report.add_argument("--project", required=True)
     report.add_argument(
         "--kind",
         choices=("report", "file", "image"),
         default="report",
-        help="delivery kind: text report (default), file-only document, or image",
+        help="delivery kind: structured text update (default), file-only document, or image",
     )
     report.add_argument("--file", help="file to deliver for --kind file|image")
-    report.add_argument("--summary", help="report text, or caption for file/image kinds")
-    report.add_argument("--verification")
-    report.add_argument("--rollback")
+    report.add_argument("--new", dest="new_items", action="append", default=[], help="new user-facing addition; repeat for list items")
+    report.add_argument("--changed", dest="changed_items", action="append", default=[], help="user-facing change; repeat for list items")
+    report.add_argument("--fixed", dest="fixed_items", action="append", default=[], help="user-facing fix; repeat for list items")
+    report.add_argument("--summary", help="optional caption for file/image deliveries")
     report.add_argument("--route", required=True, help="user-owned local route alias")
     report.add_argument(
         "--user-authorized",
