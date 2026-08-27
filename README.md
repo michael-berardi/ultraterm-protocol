@@ -71,27 +71,28 @@ Agents may suggest a handoff or an additional worker when a dry run reports free
 
 ## Universal friendly reports
 
-`utp report` is the single-call path for user-requested Felix, Telegram, bot, group, or generic reports:
+`utp report` is the single-call path for user-requested Telegram, bot, group, or generic project updates:
 
 ```sh
 utp report \
-  --route felix:group-alias \
+  --route team:group-alias \
   --project project-name \
-  --summary "Friendly one-line result." \
-  --verification "Exact proof observed." \
-  --rollback "Concrete rollback path." \
+  --new "A new capability is now available." \
+  --new "A second addition is ready to use." \
+  --changed "An existing experience is easier to use." \
+  --fixed "A user-visible problem no longer occurs." \
   --user-authorized
 ```
 
-The route is a local alias. A user-owned hook holds chat IDs, bot tokens, provider authentication, formatting, and delivery logic outside UTP. After verified work, send once through UTP; do not duplicate the message through a browser or provider API.
+Each repeated flag becomes one bullet. The recipient sees only the non-empty `What's new`, `What's changed`, and `Fixes` sections. Text reports reject paragraphs, technical workflow details, verification chatter, deployment mechanics, commit identifiers, rollback instructions, and protected values. The route is a local alias; a user-owned hook keeps chat IDs, bot tokens, provider authentication, project labels, and delivery outside UTP.
 
 ### Files and images
 
-`--kind report` (the default) sends the text report above. `--kind file` and `--kind image` deliver a single file instead:
+`--kind report` (the default) sends the structured update above. `--kind file` and `--kind image` deliver a single file instead:
 
 ```sh
 utp report \
-  --route felix:group-alias \
+  --route team:group-alias \
   --project project-name \
   --kind file \
   --file /path/to/archive.zip \
@@ -99,7 +100,7 @@ utp report \
   --user-authorized
 ```
 
-`--kind file|image` requires `--file`: a regular, non-empty file up to 45 MiB, sent by its resolved path. `--summary` becomes an optional caption (up to 1024 characters); `--verification` and `--rollback` are optional. Passing `--file` with the default `--kind report` is rejected.
+`--kind file|image` requires `--file`: a regular, non-empty file up to 45 MiB, sent by its resolved path. `--summary` is an optional caption of at most 1024 characters. `--new`, `--changed`, and `--fixed` apply only to text reports.
 
 ### Redacting prior messages
 

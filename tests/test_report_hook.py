@@ -51,12 +51,14 @@ class ReportHookTests(unittest.TestCase):
 
     def run_authorized_report(self):
         return self.run_report(
-            "--summary",
-            "The feature is available.",
-            "--verification",
-            "The focused workflow passed.",
-            "--rollback",
-            "Restore the previous verified build.",
+            "--new",
+            "The feature is now available.",
+            "--new",
+            "Teams can use it from the main workspace.",
+            "--changed",
+            "The related settings are easier to find.",
+            "--fixed",
+            "Existing selections no longer reset.",
             "--user-authorized",
         )
 
@@ -81,26 +83,82 @@ class ReportHookTests(unittest.TestCase):
             {
                 "kind": "report",
                 "project": "sample-product",
-                "summary": "The feature is available.",
-                "verification": "The focused workflow passed.",
+                "new": [
+                    "The feature is now available.",
+                    "Teams can use it from the main workspace.",
+                ],
+                "changed": ["The related settings are easier to find."],
+                "fixed": ["Existing selections no longer reset."],
                 "route": "felix:sample-group",
-                "rollback": "Restore the previous verified build.",
             },
         )
 
     def test_requires_explicit_delivery_authorization(self):
         result = self.run_report(
-            "--summary",
-            "Done.",
-            "--verification",
-            "Verified.",
-            "--rollback",
-            "Revert.",
+            "--new",
+            "The feature is now available.",
         )
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--user-authorized", result.stderr)
         self.assertFalse(self.output.exists())
+
+    def test_report_requires_at_least_one_user_relevant_item(self):
+        result = self.run_report("--user-authorized")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("at least one", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_report_rejects_technical_workflow_noise(self):
+        result = self.run_report(
+            "--new",
+            "Deployed from commit abc123 after tests passed.",
+            "--user-authorized",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("technical workflow noise", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_report_rejects_legacy_verification_flag(self):
+        result = self.run_report(
+            "--new",
+            "The feature is now available.",
+            "--verification",
+            "Tests passed.",
+            "--user-authorized",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_report_rejects_paragraph_summary(self):
+        result = self.run_report(
+            "--summary",
+            "A large paragraph that mixes every kind of update.",
+            "--user-authorized",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--summary only applies", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_report_deduplicates_repeated_items(self):
+        result = self.run_report(
+            "--new",
+            "The feature is now available.",
+            "--new",
+            "The feature is now available.",
+            "--user-authorized",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(self.output.read_text())["new"],
+            ["The feature is now available."],
+        )
 
     def test_file_kind_requires_file(self):
         result = self.run_report(
@@ -122,12 +180,8 @@ class ReportHookTests(unittest.TestCase):
         result = self.run_report(
             "--file",
             str(attachment),
-            "--summary",
-            "The feature is available.",
-            "--verification",
-            "The focused workflow passed.",
-            "--rollback",
-            "Restore the previous verified build.",
+            "--new",
+            "The feature is now available.",
             "--user-authorized",
         )
 
@@ -156,9 +210,7 @@ class ReportHookTests(unittest.TestCase):
                 "kind": "file",
                 "project": "sample-product",
                 "summary": "Optional caption.",
-                "verification": "",
                 "route": "felix:sample-group",
-                "rollback": "",
                 "file": os.path.realpath(attachment),
             },
         )
@@ -184,9 +236,7 @@ class ReportHookTests(unittest.TestCase):
                 "kind": "image",
                 "project": "sample-product",
                 "summary": "Chart.",
-                "verification": "",
                 "route": "felix:sample-group",
-                "rollback": "",
                 "file": os.path.realpath(image),
             },
         )
