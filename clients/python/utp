@@ -18,7 +18,7 @@ Usage:
                                         # target slot only; dry-run binds ID
   utp switch-profile PROFILE [--slot N] [--expected-id ID] [--confirm]
                                         # target replacement; dry-run binds ID
-  utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET
+  utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET --manager-slot M
                                         # dry-run; confirmation requires user permission
   utp report --route ROUTE --project NAME [--new ITEM] [--changed ITEM] [--fixed ITEM]
                                         # structured text update; repeat flags for list items
@@ -30,10 +30,11 @@ Usage:
                                         # delete the bot's own prior messages; explicit IDs only
   utp task-done --summary TEXT [--from N] [--to N]
   utp profiles list
-  utp profiles create NAME MODEL THINKING [--title-model MODEL]
+  utp profiles create NAME MODEL THINKING [--title-model MODEL] [--routing UPSTREAM[,UPSTREAM...]]
   utp profiles remove NAME
 """
 
+from __future__ import annotations
 import argparse
 import json
 import os
@@ -53,7 +54,7 @@ PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 TECHNICAL_REPORT_NOISE_RE = re.compile(
     r"(?i)\b(?:verified|verification|rollback|commit|sha|origin/main|"
     r"deploy(?:ed|ment)?|tests?\s+passed|test suite|testing\s+(?:passed|completed)|pytest|vitest|eslint|typescript|"
-    r"cloudflare worker|(?:internal|build) workflow|version id)\b"
+    r"(?:internal|build) workflow|version id)\b"
 )
 MAX_REPORT_ITEMS = 24
 MAX_SECTION_ITEMS = 12
@@ -125,6 +126,9 @@ def profile_create_request(args: argparse.Namespace) -> dict:
     title_model = args.title_model or args.title_model_option
     if title_model:
         request["titleModel"] = title_model
+    routing = getattr(args, "routing", None)
+    if routing:
+        request["routing"] = routing.strip()
     return request
 
 
@@ -141,6 +145,7 @@ def add_profile_commands(sub: argparse._SubParsersAction) -> None:
     create.add_argument("--model", dest="model_option")
     create.add_argument("--thinking", dest="thinking_option")
     create.add_argument("--title-model")
+    create.add_argument("--routing", help="comma-separated upstream model ids")
     create.add_argument("--titleModel", dest="title_model_option")
 
     remove = profile_sub.add_parser("remove", help="remove an inactive OMP profile")
@@ -152,21 +157,45 @@ def print_error(response: dict) -> None:
         sys.exit(f"utp: {response.get('error', 'request failed')}")
 
 
+def dynamic_tmux_slot() -> int | None:
+    pane = os.environ.get("TMUX_PANE")
+    if not pane:
+        return None
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.fullmatch(r"ultraterm-matrix-([1-8])", result.stdout.strip())
+    return int(match.group(1)) if result.returncode == 0 and match else None
+
+
 def caller_slot(explicit, command: str) -> int:
     if explicit is not None:
         return explicit
-    value = os.environ.get("ULTRATERM_SLOT")
-    try:
-        slot = int(value or "")
-    except ValueError:
-        slot = 0
+    slot = dynamic_tmux_slot()
+    if slot is None:
+        value = os.environ.get("ULTRATERM_SLOT")
+        try:
+            slot = int(value or "")
+        except ValueError:
+            slot = 0
     if slot <= 0:
         raise SystemExit(
-            f"utp {command}: set ULTRATERM_SLOT or pass --from with the calling terminal slot"
+            f"utp {command}: run inside an UltraTerm session or pass --from"
         )
     return slot
 
+
 def optional_caller_slot() -> int | None:
+    slot = dynamic_tmux_slot()
+    if slot is not None:
+        return slot
     value = os.environ.get("ULTRATERM_SLOT")
     try:
         slot = int(value or "")

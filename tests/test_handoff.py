@@ -76,7 +76,10 @@ class HandoffPacketTests(unittest.TestCase):
                 "--confirm",
                 "--user-authorized",
             ],
-            env={**os.environ, "ULTRATERM_SLOT": "2"},
+            env={
+                **{key: value for key, value in os.environ.items() if key not in {"TMUX", "TMUX_PANE"}},
+                "ULTRATERM_SLOT": "2",
+            },
             text=True,
             capture_output=True,
         )

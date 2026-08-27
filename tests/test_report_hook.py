@@ -42,7 +42,7 @@ class ReportHookTests(unittest.TestCase):
             [
                 "report",
                 "--route",
-                "felix:sample-group",
+                "team:sample-group",
                 "--project",
                 "sample-product",
                 *extra,
@@ -67,7 +67,7 @@ class ReportHookTests(unittest.TestCase):
             [
                 "redact",
                 "--route",
-                "felix:sample-group",
+                "team:sample-group",
                 "--project",
                 "sample-product",
                 *extra,
@@ -89,7 +89,7 @@ class ReportHookTests(unittest.TestCase):
                 ],
                 "changed": ["The related settings are easier to find."],
                 "fixed": ["Existing selections no longer reset."],
-                "route": "felix:sample-group",
+                "route": "team:sample-group",
             },
         )
 
@@ -210,7 +210,7 @@ class ReportHookTests(unittest.TestCase):
                 "kind": "file",
                 "project": "sample-product",
                 "summary": "Optional caption.",
-                "route": "felix:sample-group",
+                "route": "team:sample-group",
                 "file": os.path.realpath(attachment),
             },
         )
@@ -236,7 +236,7 @@ class ReportHookTests(unittest.TestCase):
                 "kind": "image",
                 "project": "sample-product",
                 "summary": "Chart.",
-                "route": "felix:sample-group",
+                "route": "team:sample-group",
                 "file": os.path.realpath(image),
             },
         )
@@ -272,7 +272,7 @@ class ReportHookTests(unittest.TestCase):
             {
                 "op": "redact",
                 "project": "sample-product",
-                "route": "felix:sample-group",
+                "route": "team:sample-group",
                 "message_ids": [3, 7],
                 "reason": "cleanup",
             },
