@@ -42,17 +42,10 @@ class HandoffPacketTests(unittest.TestCase):
             UTP.handoff_packet_path(str(link))
 
     def test_rejects_symlinked_parent_outside_tmp(self):
-        outside = tempfile.TemporaryDirectory()
-        try:
-            outside_packet = Path(outside.name) / "handoff.md"
-            outside_packet.write_text("# Goal\\nOutside packet.\\n")
-            outside_packet.chmod(0o600)
-            linked_parent = self.root / "outside"
-            linked_parent.symlink_to(outside.name, target_is_directory=True)
-            with self.assertRaisesRegex(SystemExit, "resolve to a file under /tmp"):
-                UTP.handoff_packet_path(str(linked_parent / "handoff.md"))
-        finally:
-            outside.cleanup()
+        linked_parent = self.root / "outside"
+        linked_parent.symlink_to(CLIENT.parent, target_is_directory=True)
+        with self.assertRaisesRegex(SystemExit, "resolve to a file under /tmp"):
+            UTP.handoff_packet_path(str(linked_parent / CLIENT.name))
 
     def test_rejects_packet_outside_tmp(self):
         with self.assertRaisesRegex(SystemExit, "resolve to a file under /tmp"):

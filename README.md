@@ -13,10 +13,9 @@ export PATH="$HOME/.ultraterm/bin:$PATH"  # add to your shell profile to persist
 
 Do not overwrite the app-managed binary. To try the checked-in source client,
 link `clients/python/utp` under a different name or location such as
-`$HOME/.local/bin/utp-source`.
-
-UltraTerm must be running for socket commands. The checked-in stdlib-only
-Python client is the public reference source for the installed client.
+`$HOME/.local/bin/utp-source`. The source client matches the installed client;
+standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
+also available.
 
 ## Protocol v2
 
@@ -27,7 +26,8 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | Client command | Behavior |
 |---|---|
 | `utp list` | Read-only attached slot/session inventory. |
-| `utp inspect --slot N` | Read-only bounded PTY history, not reconstructed screen state. |
+| `utp inspect --slot N` | Read-only bounded PTY history; model-readable UltraCompact output by default, or plain text with `--no-uc`. |
+| `utp savings [--rate DOLLARS_PER_MILLION]` | Read local UltraCompact telemetry and summarize saved tokens for the day, 7 days, 30 days, and all time. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
 | `utp message --to N TEXT` | Neutral addressed notice; no prompt input or broadcast. |
 | `utp open --profile P` | Dry-run the lowest-free-slot assignment; confirmation attaches its pane. |
@@ -46,6 +46,15 @@ Profile creation may include a provider-neutral ordered routing list:
 utp profiles create quality provider/model high \
   --routing upstream/primary,upstream/fallback
 ```
+
+## Model-readable inspection and savings
+
+The server always returns bounded PTY history. The reference client passes that
+history through UltraCompact by default so agents receive a compact readable
+packet; `utp inspect --no-uc` prints the server text unchanged. `utp savings`
+reads the bundled UltraCompact telemetry locally and can add an estimated value
+with `--rate`. Neither command sends terminal output or telemetry over a
+network.
 
 ## Identity-bound slot lifecycle
 

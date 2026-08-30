@@ -4,18 +4,25 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-30
+
 ### Added
 
 - `utp report --kind file|image --file PATH` delivers one regular, non-empty file up to 45 MiB by resolved path; `--summary` is an optional caption of at most 1024 characters.
-- `utp redact --route ROUTE --project NAME --message-id N [...] --reason TEXT --user-authorized` deletes the bot's own prior messages by explicit ID only (1-20 positive IDs per call, deduplicated and sorted), with a fail-open audit entry written for every call.
+- `utp redact --route ROUTE --project NAME --message-id N [...] --reason TEXT --user-authorized` deletes the bot's own prior messages by explicit ID only, with one audit record for every call.
+- `utp savings [--rate DOLLARS_PER_MILLION]` summarizes local UltraCompact token savings for the day, 7 days, 30 days, and all time.
 
 ### Changed
 
-- Text reports now use repeatable `--new`, `--changed`, and `--fixed` items rendered as separate scannable sections. Paragraph summaries, verification chatter, deployment mechanics, commit identifiers, and rollback instructions are rejected as recipient-irrelevant noise.
-- The reference client now matches the installed UltraTerm client, including
-  provider-neutral profile routing and automatic caller-slot discovery inside
-  UltraTerm tmux sessions.
+- Text reports now use repeatable `--new`, `--changed`, and `--fixed` items rendered as separate scannable sections. Paragraph summaries and recipient-irrelevant technical workflow details are rejected.
+- `utp inspect` now emits model-readable UltraCompact output by default; `--no-uc` preserves plain PTY history for standalone clients and debugging.
+- The public reference client now matches the installed UltraTerm client, including automatic caller-slot discovery, provider-neutral profile routing, and the built-in `Auto` profile label.
 - Public report-hook examples and fixtures use neutral route aliases.
+
+### Security
+
+- Redaction accepts only 1–20 explicit positive message IDs and deletes only the hook provider's own prior messages.
+- Report validation rejects protected values and technical workflow details before a user-owned hook receives the payload.
 
 ## [2.0.0] - 2026-08-24
 

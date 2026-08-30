@@ -7,8 +7,8 @@ Speaks JSON Lines to ~/.ultraterm/utp.sock.
 
 Usage:
   utp list                              # read-only attached-terminal inventory
-  utp inspect --slot 2 [--lines 80] [--raw]
-                                        # read-only recent PTY history, not screen state
+  utp inspect --slot 2 [--lines 80] [--raw] [--no-uc]
+                                        # read-only PTY history; model-readable UC (c=j/r)
   utp send --slot 2 "ls -la"            # target PTY input + Enter
   utp message --from 1 --to 2 "tests are green"
                                         # neutral addressed notice, no PTY input
@@ -54,7 +54,7 @@ PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 TECHNICAL_REPORT_NOISE_RE = re.compile(
     r"(?i)\b(?:verified|verification|rollback|commit|sha|origin/main|"
     r"deploy(?:ed|ment)?|tests?\s+passed|test suite|testing\s+(?:passed|completed)|pytest|vitest|eslint|typescript|"
-    r"(?:internal|build) workflow|version id)\b"
+    r"cloudflare worker|(?:internal|build) workflow|version id)\b"
 )
 MAX_REPORT_ITEMS = 24
 MAX_SECTION_ITEMS = 12
@@ -383,6 +383,14 @@ def main() -> None:
     inspect.add_argument("--lines", type=int, default=80)
     inspect.add_argument("--raw", action="store_true")
 
+    savings = sub.add_parser(
+        "savings", help="tokens saved by UltraTerm (day / 7d / 30d / all-time)"
+    )
+    savings.add_argument("--rate", type=float,
+                         help="optional dollars per 1M tokens for the estimate")
+    inspect.add_argument("--no-uc", action="store_true",
+                         help="emit plain terminal text instead of an UltraCompact packet")
+
     send = sub.add_parser("send", help="send input to a terminal's PTY")
     send.add_argument("--slot", type=int)
     send.add_argument("--id")
@@ -500,7 +508,7 @@ def main() -> None:
         response = call({"cmd": "list"})
         print_error(response)
         for session in sorted(response["sessions"], key=lambda s: s["slot"]):
-            profile = session.get("launchProfile") or "Default OMP"
+            profile = session.get("launchProfile") or "Auto"
             omp = "omp" if session.get("launchedOmp") else "shell"
             print(f"{session['slot']}\t{session['title']}\t{omp}\t{profile}\t{session['id']}")
         return
@@ -523,6 +531,19 @@ def main() -> None:
         print_error(response)
         return
 
+    if args.cmd == "savings":
+        uc_bin = os.environ.get("UC_BIN") or os.path.expanduser(
+            "~/.ultraterm/bin/uc"
+        )
+        command = [uc_bin, "telemetry"]
+        if args.rate is not None:
+            command.extend(["--rate", str(args.rate)])
+        proc = subprocess.run(
+            command, capture_output=True, text=True, timeout=30,
+        )
+        sys.stdout.write(proc.stdout)
+        return
+
     if args.cmd == "inspect":
         request = {"cmd": "inspect", "lines": args.lines, "raw": args.raw}
         if args.slot is not None:
@@ -533,6 +554,30 @@ def main() -> None:
             sys.exit("utp inspect: --slot or --id required")
         response = call(request)
         print_error(response)
+        if not getattr(args, "no_uc", False):
+            uc_bin = os.environ.get("UC_BIN") or os.path.expanduser(
+                "~/.ultraterm/bin/uc"
+            )
+            payload = json.dumps(
+                {"slot": response.get("slot"), "text": response["text"]},
+                separators=(",", ":"),
+            )
+            uc_env = {**os.environ, "UC_TELEMETRY_SOURCE": "utp"}
+            if "UC_TELEMETRY" not in uc_env and "UC_TELEMETRY_PATH" not in uc_env:
+                default_sink = os.path.expanduser(
+                    "~/.local/state/ultracompact/telemetry.jsonl"
+                )
+                if os.path.isfile(default_sink):
+                    uc_env["UC_TELEMETRY_PATH"] = default_sink
+            proc = subprocess.run([uc_bin, "encode", "--readable", "--stats"], input=payload,
+                                  capture_output=True, text=True, timeout=30,
+                                  env=uc_env)
+            if proc.returncode != 0:
+                sys.exit(f"utp: UC encoding failed: {proc.stderr.strip()}")
+            if proc.stderr.strip():
+                print(proc.stderr.strip(), file=sys.stderr)
+            print(proc.stdout, end="")
+            return
         print(response["text"])
         return
 
