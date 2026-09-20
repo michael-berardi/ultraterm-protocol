@@ -10,7 +10,10 @@ test -f "$PACKET"
 chmod 600 "$PACKET"
 
 # Safe suggestion only. After explicit user approval, repeat the printed plan
-# with --confirm --user-authorized and its exact --expected-id.
+# with --confirm --user-authorized and its exact --expected-id. A confirmed
+# handoff waits for the receiver, then registers that exact worker session ID
+# against the manager session ID it read from `utp list`; registrations and
+# completions are never typed into a PTY.
 utp handoff \
   --slot "$WORKER_SLOT" \
   --profile "$PROFILE" \
