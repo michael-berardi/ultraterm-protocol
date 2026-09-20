@@ -2,7 +2,7 @@
 # canonical home; UltraTerm vendors this
 """utp — UltraTerm Protocol CLI.
 
-Control socket for UltraTerm terminals and universal OMP profile management.
+Control socket for UltraTerm terminals and UltraTerm Profiles (harness-scoped launch choices; legacy OMP adapter for mutations).
 Speaks JSON Lines to ~/.ultraterm/utp.sock.
 
 Usage:
@@ -11,14 +11,14 @@ Usage:
                                         # read-only PTY history; model-readable UC (c=j/r)
   utp send --slot 2 "ls -la"            # target PTY input + Enter
   utp message --from 1 --to 2 "tests are green"
-                                        # neutral addressed notice, no PTY input
-  utp open --profile NAME [--title s] [--confirm]
+                                        # native durable inbox; unsupported hosts fail, no PTY input
+  utp open --harness HARNESS --profile NAME [--title s] [--confirm]
                                         # lowest free slot; dry-run by default
   utp close --slot N [--expected-id ID] [--confirm]
                                         # target slot only; dry-run binds ID
-  utp switch-profile PROFILE [--slot N] [--expected-id ID] [--confirm]
+  utp switch-profile PROFILE [--harness omp] [--slot N] [--expected-id ID] [--confirm]
                                         # target replacement; dry-run binds ID
-  utp handoff --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET --manager-slot M
+  utp handoff [--harness HARNESS] --profile NAME (--slot N | --new-slot) --packet /tmp/PACKET --manager-slot M
                                         # dry-run; confirmation requires user permission
   utp report --route ROUTE --project NAME [--new ITEM] [--changed ITEM] [--fixed ITEM]
                                         # structured text update; repeat flags for list items
@@ -28,10 +28,11 @@ Usage:
                                         # image delivery
   utp redact --route ROUTE --project NAME --message-id N [--message-id N ...] --reason TEXT
                                         # delete the bot's own prior messages; explicit IDs only
-  utp task-done --summary TEXT [--from N] [--to N]
+  utp register-manager --from N --from-id ID --slot N --expected-id ID
+  utp task-done --from-id ID --summary TEXT [--from N] [--to N --expected-id ID]
   utp profiles list
-  utp profiles create NAME MODEL THINKING [--title-model MODEL] [--routing UPSTREAM[,UPSTREAM...]]
-  utp profiles remove NAME
+  utp profiles create --adapter omp NAME MODEL THINKING [--title-model MODEL] [--routing UPSTREAM[,UPSTREAM...]]
+  utp profiles remove --adapter omp NAME
 """
 
 from __future__ import annotations
@@ -40,10 +41,12 @@ import json
 import os
 import re
 import socket
+import tempfile
 import stat
 import subprocess
 import sys
 import time
+import uuid
 
 SOCKET_PATH = os.path.expanduser("~/.ultraterm/utp.sock")
 REPORT_HOOK_PATH = os.path.expanduser(
@@ -86,28 +89,80 @@ def normalize_report_items(values: list[str], name: str) -> list[str]:
 
 
 
+MAX_REPLY_BYTES = 1024 * 1024
+TRANSPORT_TIMEOUT = 10
+READ_ONLY_COMMANDS = {"list", "inspect", "diagnose", "profiles.list", "profiles.catalog", "message.receipt"}
+
+
 def call(request: dict) -> dict:
-    if not os.path.exists(SOCKET_PATH):
-        sys.exit(f"utp: UltraTerm control socket not found at {SOCKET_PATH} (is UltraTerm running?)")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sent = False
+    readonly = request.get("cmd") in READ_ONLY_COMMANDS or (
+        request.get("cmd") in {"open", "close", "profile.switch"} and not request.get("confirm")
+    )
+
+    def fail(reason: str) -> None:
+        outcome = ("; mutation outcome unknown; do not retry automatically; reconcile with read-only queries"
+                   if sent and not readonly else
+                   "; no request sent" if not sent else "; read-only request failed")
+        raise SystemExit("utp: " + reason + outcome)
+
+    payload = json.dumps(request).encode() + b"\n"
+    if len(payload) > 65536:
+        fail("request exceeds 65536-byte limit")
     try:
-        sock.settimeout(10)
-        sock.connect(SOCKET_PATH)
-        sock.sendall(json.dumps(request).encode() + b"\n")
-        chunks = []
-        while True:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            if b"\n" in chunk:
-                break
-    finally:
-        sock.close()
-    line = b"".join(chunks).split(b"\n", 1)[0]
-    if not line:
-        sys.exit("utp: empty response from UltraTerm")
-    return json.loads(line)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            deadline = time.monotonic() + TRANSPORT_TIMEOUT
+            sock.settimeout(TRANSPORT_TIMEOUT)
+            sock.connect(SOCKET_PATH)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                fail("transport timeout")
+            sock.settimeout(remaining)
+            # sendall may partially write before failing; never replay the request.
+            sent = True
+            sock.sendall(payload)
+            data = bytearray()
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    fail("transport timeout")
+                sock.settimeout(remaining)
+                chunk = sock.recv(min(65536, MAX_REPLY_BYTES + 1 - len(data)))
+                if not chunk:
+                    fail("truncated reply" if data else "disconnected before reply")
+                data.extend(chunk)
+                newline = data.find(b"\n")
+                if newline >= 0:
+                    if newline > MAX_REPLY_BYTES:
+                        fail("oversized reply")
+                    line = bytes(data[:newline])
+                    break
+                if len(data) > MAX_REPLY_BYTES:
+                    fail("oversized reply")
+    except socket.timeout:
+        fail("transport timeout")
+    except FileNotFoundError:
+        fail("control socket not found (is UltraTerm running?)")
+    except ConnectionRefusedError:
+        fail("control socket connection refused")
+    except OSError:
+        fail("control socket disconnected or unavailable")
+    try:
+        response = json.loads(line)
+    except (ValueError, UnicodeError, RecursionError):
+        fail("malformed JSON reply")
+    if not isinstance(response, dict) or type(response.get("ok")) is not bool:
+        fail("malformed reply: expected object with boolean ok")
+    if response["ok"] and request.get("cmd") == "inspect" and not isinstance(response.get("text"), str):
+        fail("malformed inspect reply: expected text string")
+    return response
+
+
+def run_uc(command: list[str], **kwargs) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(command, **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        raise SystemExit("utp: optional UC codec unavailable or timed out; for plain inspection use --no-uc") from None
 
 
 def profile_create_request(args: argparse.Namespace) -> dict:
@@ -133,11 +188,13 @@ def profile_create_request(args: argparse.Namespace) -> dict:
 
 
 def add_profile_commands(sub: argparse._SubParsersAction) -> None:
-    profiles = sub.add_parser("profiles", help="manage OMP profiles")
+    profiles = sub.add_parser("profiles", help="UltraTerm Profiles: catalog and legacy OMP adapter")
     profile_sub = profiles.add_subparsers(dest="profiles_cmd", required=True)
-    profile_sub.add_parser("list", help="list discovered OMP profiles")
+    listing = profile_sub.add_parser("list", help="list UltraTerm Profiles by harness")
+    listing.add_argument("--adapter", choices=["omp"], help="list legacy OMP adapter profiles instead")
 
-    create = profile_sub.add_parser("create", help="create an OMP profile")
+    create = profile_sub.add_parser("create", help="create a profile through the legacy OMP adapter only")
+    create.add_argument("--adapter", choices=["omp"], required=True)
     create.add_argument("name", nargs="?")
     create.add_argument("model", nargs="?")
     create.add_argument("thinking", nargs="?")
@@ -148,7 +205,8 @@ def add_profile_commands(sub: argparse._SubParsersAction) -> None:
     create.add_argument("--routing", help="comma-separated upstream model ids")
     create.add_argument("--titleModel", dest="title_model_option")
 
-    remove = profile_sub.add_parser("remove", help="remove an inactive OMP profile")
+    remove = profile_sub.add_parser("remove", help="remove an inactive legacy OMP adapter profile")
+    remove.add_argument("--adapter", choices=["omp"], required=True)
     remove.add_argument("name")
 
 
@@ -180,6 +238,8 @@ def caller_slot(explicit, command: str) -> int:
         return explicit
     slot = dynamic_tmux_slot()
     if slot is None:
+        if os.environ.get("TMUX_PANE"):
+            raise SystemExit(f"utp {command}: cannot resolve current tmux slot; pass --from explicitly")
         value = os.environ.get("ULTRATERM_SLOT")
         try:
             slot = int(value or "")
@@ -205,13 +265,22 @@ def optional_caller_slot() -> int | None:
 
 def handoff_packet_path(value: str) -> str:
     path = os.path.abspath(value)
-    root = os.path.realpath("/tmp")
+    # /tmp and the platform temp dir (macOS TMPDIR lives under /var/folders,
+    # a symlink family away from /tmp) are both acceptable staging areas.
+    roots = [os.path.realpath("/tmp")]
+    platform_temp = os.path.realpath(tempfile.gettempdir())
+    if platform_temp not in roots:
+        roots.append(platform_temp)
     resolved = os.path.realpath(path)
-    try:
-        common = os.path.commonpath((resolved, root))
-    except ValueError:
-        common = ""
-    if common != root:
+    inside = False
+    for root in roots:
+        try:
+            if os.path.commonpath((resolved, root)) == root:
+                inside = True
+                break
+        except ValueError:
+            continue
+    if not inside:
         raise SystemExit("utp handoff: packet must resolve to a file under /tmp")
     try:
         details = os.lstat(path)
@@ -244,30 +313,59 @@ def wait_for_terminal_ready(slot: int) -> None:
     )
 
 
-def submit_handoff(slot: int, packet: str) -> None:
-    wait_for_terminal_ready(slot)
+def submit_handoff(session: dict, packet: str) -> None:
     prompt = (
         f"Read the authoritative handoff packet at {packet}. Continue every remaining "
         "todo without repeating completed work. Reuse its resources and artifacts, "
         "preserve its constraints and decisions, and verify before reporting."
     )
-    response = call({"cmd": "send", "slot": slot, "text": prompt, "enter": True})
+    # Pin delivery to the session ID captured at open/switch time: the server
+    # refuses the send when that slot now holds a different session.
+    response = call({
+        "cmd": "send",
+        "slot": session["slot"],
+        "expectedId": session["id"],
+        "text": prompt,
+        "enter": True,
+    })
     print_error(response)
 
 
 def cleanup_opened_handoff(session: dict) -> None:
-    response = call({
-        "cmd": "close",
-        "slot": session["slot"],
-        "expectedId": session["id"],
-        "confirm": True,
-    })
+    """Close the pane this handoff opened, bound to the ID it was opened with."""
+    try:
+        response = call({
+            "cmd": "close",
+            "slot": session["slot"],
+            "expectedId": session["id"],
+            "confirm": True,
+        })
+    except SystemExit as error:
+        # Never mask the handoff error that triggered cleanup; the close outcome
+        # is unknown and stays the operator's decision to reconcile.
+        print(
+            f"utp handoff: cleanup for slot {session['slot']} ({session['id']}) "
+            f"did not confirm: {error}",
+            file=sys.stderr,
+        )
+        return
     if not response.get("ok"):
         print(
-            f"utp handoff: cleanup failed for slot {session['slot']}: "
+            f"utp handoff: cleanup failed for slot {session['slot']} ({session['id']}): "
             f"{response.get('error', 'request failed')}",
             file=sys.stderr,
         )
+
+
+def report_uncertain_submission(session: dict) -> None:
+    """An attempted packet may already be delivering, so its pane is never closed."""
+    print(
+        f"utp handoff: submission to slot {session['slot']} ({session['id']}) did not "
+        "confirm; the packet may already be delivering, so that session was left "
+        f"untouched — verify with 'utp inspect --slot {session['slot']}', adopt it, or "
+        f"close it explicitly with --expected-id {session['id']}",
+        file=sys.stderr,
+    )
 
 
 def run_hook(command: str, payload: dict) -> None:
@@ -374,7 +472,9 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--version", action="version", version="2.2.0")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")
 
     inspect = sub.add_parser("inspect", help="show recent output of a terminal")
@@ -394,20 +494,23 @@ def main() -> None:
     send = sub.add_parser("send", help="send input to a terminal's PTY")
     send.add_argument("--slot", type=int)
     send.add_argument("--id")
+    send.add_argument("--expected-id", help="reject a replaced or renumbered target")
     send.add_argument("text")
     send.add_argument("--no-enter", action="store_true")
 
     open = sub.add_parser("open", help="start a new UltraTerm session")
-    open.add_argument("--profile", required=True, help="OMP profile to launch")
+    open.add_argument("--harness", default="steak-pi", help="UltraTerm harness id (default: steak-pi; omp selects legacy adapter)")
+    open.add_argument("--profile", required=True, help="UltraTerm Profile id within the selected harness")
     open.add_argument("--title", help="display title for the new terminal")
     open.add_argument("--confirm", action="store_true",
                       help="actually create the session (default: dry run)")
 
     switch_profile = sub.add_parser(
         "switch-profile",
-        help="replace an existing terminal's OMP profile in place",
+        help="replace an OMP terminal profile in place (backend limitation)",
     )
-    switch_profile.add_argument("profile", help="OMP profile to launch")
+    switch_profile.add_argument("profile", help="legacy OMP adapter profile to launch")
+    switch_profile.add_argument("--harness", choices=["omp"], default="omp", help="in-place backend currently supports omp only")
     switch_profile.add_argument("--slot", type=int, help="terminal slot; defaults to ULTRATERM_SLOT")
     switch_profile.add_argument("--confirm", action="store_true",
                                 help="actually switch the profile (default: dry run)")
@@ -418,7 +521,8 @@ def main() -> None:
         "handoff",
         help="transfer a compact context packet to a replacement or new worker",
     )
-    handoff.add_argument("--profile", required=True, help="OMP profile for the receiving worker")
+    handoff.add_argument("--profile", required=True, help="UltraTerm Profile id for the receiving worker")
+    handoff.add_argument("--harness", help="new slot: defaults to steak-pi; in-place: omp only (default)")
     target = handoff.add_mutually_exclusive_group(required=True)
     target.add_argument("--slot", type=int, help="replace the worker in this slot")
     target.add_argument("--new-slot", action="store_true", help="open the lowest free worker slot")
@@ -439,20 +543,30 @@ def main() -> None:
                        help="actually close the session (default: dry run)")
     close.add_argument("--expected-id",
                        help="session id printed by the matching dry run")
-    message = sub.add_parser("message", help="show an addressed message banner on another terminal")
+    message = sub.add_parser("message", help="durably queue a peer message; not proof of host delivery")
     message.add_argument("--from", dest="from_slot", type=int, help="sender slot; defaults to ULTRATERM_SLOT")
     message.add_argument("--to", type=int, required=True)
     message.add_argument("text")
+    message.add_argument("--notice-only", action="store_true", help="ephemeral workspace banner only")
+    message.add_argument("--receipt-id", help="stable UUID for receipt lookup and server-supported deduplication; generated before transmission if absent")
+    receipt = sub.add_parser("receipt", help="read durable message receipt (never model-read proof)")
+    receipt.add_argument("receipt_id")
+    message.add_argument("--expected-id", help="target session ID from list")
 
     register_manager = sub.add_parser(
         "register-manager",
         help="register this worker terminal's manager",
     )
+    register_manager.add_argument("--from-id", required=True, help="stable worker session ID from list; never infer from a slot")
+    register_manager.add_argument("--expected-id", required=True, help="stable manager session ID from list")
     register_manager.add_argument("--slot", type=int, required=True, help="manager terminal slot")
     register_manager.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
 
-    task_done = sub.add_parser("task-done", help="report completion to this worker's manager")
+    task_done = sub.add_parser("task-done", help="report completion to the previously registered native conversations (also required for --to)")
+    task_done.add_argument("--from-id", required=True, help="worker session ID captured at task assignment")
     task_done.add_argument("--summary", required=True)
+    task_done.add_argument("--receipt-id", help="stable UUID for receipt lookup and server-supported deduplication")
+    task_done.add_argument("--expected-id", help="manager session ID from list")
     task_done.add_argument("--from", dest="from_slot", type=int, help="worker terminal slot")
     task_done.add_argument("--to", type=int, help="manager terminal slot override")
 
@@ -496,6 +610,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.cmd == "diagnose":
+        response = call({"cmd": "diagnose"})
+        print_error(response)
+        print(json.dumps(response))
+        return
+
     if args.cmd == "report":
         run_report_hook(args)
         return
@@ -508,15 +628,18 @@ def main() -> None:
         response = call({"cmd": "list"})
         print_error(response)
         for session in sorted(response["sessions"], key=lambda s: s["slot"]):
-            profile = session.get("launchProfile") or "Auto"
-            omp = "omp" if session.get("launchedOmp") else "shell"
-            print(f"{session['slot']}\t{session['title']}\t{omp}\t{profile}\t{session['id']}")
+            harness = session.get("harnessId") or "shell"
+            profile = session.get("launchProfile") or "-"
+            print(f"{session['slot']}\t{session['title']}\t{harness}\t{profile}\t{session['id']}")
         return
 
     if args.cmd == "profiles":
         if args.profiles_cmd == "list":
-            response = call({"cmd": "profiles.list"})
+            response = call({"cmd": "profiles.list" if args.adapter == "omp" else "profiles.catalog"})
             print_error(response)
+            for harness in response.get("harnesses", []):
+                for profile in harness.get("profiles", []):
+                    print(f"{harness['id']}\t{profile['id']}\t{profile['name']}")
             for profile in response.get("profiles", []):
                 state = "active" if profile.get("active") else "inactive"
                 print(f"{profile['name']}\t{state}")
@@ -538,7 +661,7 @@ def main() -> None:
         command = [uc_bin, "telemetry"]
         if args.rate is not None:
             command.extend(["--rate", str(args.rate)])
-        proc = subprocess.run(
+        proc = run_uc(
             command, capture_output=True, text=True, timeout=30,
         )
         sys.stdout.write(proc.stdout)
@@ -569,7 +692,7 @@ def main() -> None:
                 )
                 if os.path.isfile(default_sink):
                     uc_env["UC_TELEMETRY_PATH"] = default_sink
-            proc = subprocess.run([uc_bin, "encode", "--readable", "--stats"], input=payload,
+            proc = run_uc([uc_bin, "encode", "--readable", "--stats"], input=payload,
                                   capture_output=True, text=True, timeout=30,
                                   env=uc_env)
             if proc.returncode != 0:
@@ -589,10 +712,17 @@ def main() -> None:
             request["id"] = args.id
         else:
             sys.exit("utp send: --slot or --id required")
-        print_error(call(request))
+        if args.expected_id:
+            request["expectedId"] = args.expected_id
+        response = call(request)
+        print_error(response)
+        print("PTY input queued; write and agent acknowledgment unconfirmed")
         return
 
     if args.cmd == "handoff":
+        harness = args.harness or ("steak-pi" if args.new_slot else "omp")
+        if not args.new_slot and harness != "omp":
+            sys.exit("utp handoff: in-place backend supports omp only; use --new-slot for other harnesses")
         packet = handoff_packet_path(args.packet)
         if args.confirm and not args.user_authorized:
             sys.exit(
@@ -617,7 +747,7 @@ def main() -> None:
             sys.exit(f"utp handoff: no live manager on slot {args.manager_slot}")
 
         if args.new_slot:
-            request = {"cmd": "open", "profile": args.profile, "confirm": args.confirm}
+            request = {"cmd": "open", "harnessId": harness, "profile": args.profile, "confirm": args.confirm}
             if args.title:
                 request["title"] = args.title
             response = call(request)
@@ -626,7 +756,7 @@ def main() -> None:
                 would = response.get("would", {})
                 print(
                     f"utp handoff: would open worker slot {would.get('slot')} with "
-                    f"OMP profile '{args.profile}' managed by slot {args.manager_slot}"
+                    f"UltraTerm Profile '{args.profile}' (harness {harness}) managed by slot {args.manager_slot}"
                 )
                 print(
                     "Dry run only — re-run with --confirm --user-authorized "
@@ -635,15 +765,27 @@ def main() -> None:
                 return
             session = response["session"]
             try:
+                wait_for_terminal_ready(session["slot"])
                 registration = call({
                     "cmd": "register.manager",
                     "from": session["slot"],
+                    "fromId": session["id"],
                     "to": args.manager_slot,
+                    "expectedId": sessions_by_slot[args.manager_slot]["id"],
                 })
                 print_error(registration)
-                submit_handoff(session["slot"], packet)
-            except Exception:
+            except BaseException:
+                # Nothing was submitted: no packet can be in flight, so the pane
+                # this handoff opened is ours to close (identity-bound). This also
+                # covers print_error/SystemExit, readiness timeout and Ctrl-C.
                 cleanup_opened_handoff(session)
+                raise
+            try:
+                submit_handoff(session, packet)
+            except BaseException:
+                # The send may have reached the PTY before the failure: keep the
+                # worker and let the operator reconcile instead of discarding work.
+                report_uncertain_submission(session)
                 raise
             target_slot = session["slot"]
         else:
@@ -659,15 +801,9 @@ def main() -> None:
                         f"utp handoff: worker target changed before confirmation; "
                         f"expected {args.expected_id}, found {found}; nothing was changed"
                     )
-            if args.confirm:
-                registration = call({
-                    "cmd": "register.manager",
-                    "from": args.slot,
-                    "to": args.manager_slot,
-                })
-                print_error(registration)
             request = {
                 "cmd": "profile.switch",
+                "harnessId": harness,
                 "slot": args.slot,
                 "profile": args.profile,
                 "confirm": args.confirm,
@@ -686,28 +822,40 @@ def main() -> None:
                     )
                 print(
                     f"utp handoff: would replace worker slot {args.slot} ({expected_id}) "
-                    f"with OMP profile '{args.profile}' managed by slot {args.manager_slot}"
+                    f"with UltraTerm Profile '{args.profile}' managed by slot {args.manager_slot}"
                 )
                 print(
                     f"Dry run only — re-run with --confirm --user-authorized "
                     f"--expected-id {expected_id} after explicit user permission."
                 )
                 return
-            target_slot = response["session"]["slot"]
-            submit_handoff(target_slot, packet)
+            session = response["session"]
+            target_slot = session["slot"]
+            wait_for_terminal_ready(target_slot)
+            registration = call({
+                "cmd": "register.manager", "from": target_slot, "fromId": session["id"],
+                "to": args.manager_slot, "expectedId": sessions_by_slot[args.manager_slot]["id"],
+            })
+            print_error(registration)
+            try:
+                submit_handoff(session, packet)
+            except BaseException:
+                # Never close an in-place replacement whose packet may be in flight.
+                report_uncertain_submission(session)
+                raise
 
         print(f"handoff submitted to worker slot {target_slot}\t{packet}")
         return
 
     if args.cmd == "open":
-        request = {"cmd": "open", "profile": args.profile, "confirm": args.confirm}
+        request = {"cmd": "open", "harnessId": args.harness, "profile": args.profile, "confirm": args.confirm}
         if args.title:
             request["title"] = args.title
         response = call(request)
         print_error(response)
         if not args.confirm:
             would = response.get("would", {})
-            line = f"utp open: would start terminal slot {would.get('slot')} with OMP profile '{args.profile}'"
+            line = f"utp open: would start terminal slot {would.get('slot')} with UltraTerm Profile '{args.profile}'"
             if would.get("title"):
                 line += f" titled '{would['title']}'"
             print(line)
@@ -723,6 +871,7 @@ def main() -> None:
             sys.exit("utp switch-profile: --confirm requires --expected-id from a fresh dry run")
         request = {
             "cmd": "profile.switch",
+            "harnessId": args.harness,
             "slot": slot,
             "profile": args.profile,
             "confirm": args.confirm,
@@ -739,7 +888,7 @@ def main() -> None:
                     "utp switch-profile: running UltraTerm predates identity-bound "
                     "confirmation; restart or update the app, then dry-run again"
                 )
-            print(f"utp switch-profile: would replace slot {slot} ({expected_id}) with OMP profile '{args.profile}'")
+            print(f"utp switch-profile: would replace slot {slot} ({expected_id}) with UltraTerm Profile '{args.profile}'")
             print(
                 f"Dry run only — re-run with --confirm --expected-id {expected_id} "
                 "to switch that exact session."
@@ -777,27 +926,54 @@ def main() -> None:
         response = call({
             "cmd": "register.manager",
             "from": caller_slot(args.from_slot, args.cmd),
+            "fromId": args.from_id,
+            "expectedId": args.expected_id,
             "to": args.slot,
         })
         print_error(response)
         print(f"manager slot {response['managerSlot']} registered for worker slot {response['from']}")
         return
 
-    if args.cmd == "task-done":
-        request = {
-            "cmd": "task.done",
-            "from": caller_slot(args.from_slot, args.cmd),
-            "text": args.summary,
-        }
-        if args.to is not None:
-            request["to"] = args.to
-        response = call(request)
+    if args.cmd == "receipt":
+        response = call({"cmd": "message.receipt", "receiptId": args.receipt_id})
         print_error(response)
-        print(f"delivered to manager slot {response['deliveredTo']}")
+        print(json.dumps(response))
         return
 
-    response = call({"cmd": "message", "from": caller_slot(args.from_slot, args.cmd), "to": args.to, "text": args.text})
+    if args.cmd == "task-done":
+        if args.to is not None and not args.expected_id:
+            sys.exit("utp task-done: --to requires --expected-id; never guess a replacement manager")
+        request = {
+            "cmd": "task.done",
+            "fromId": args.from_id,
+            "text": args.summary,
+        }
+        if args.from_slot is not None:
+            request["from"] = args.from_slot
+        if args.to is not None:
+            request["to"] = args.to
+        if args.expected_id:
+            request["expectedId"] = args.expected_id
+        request["receiptId"] = args.receipt_id or str(uuid.uuid4())
+        print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
+        response = call(request)
+        print_error(response)
+        print(json.dumps(response))
+        return
+
+    request = {"cmd": "message", "from": caller_slot(args.from_slot, args.cmd), "to": args.to, "text": args.text}
+    if args.expected_id:
+        request["expectedId"] = args.expected_id
+    request["noticeOnly"] = args.notice_only
+    if not args.notice_only:
+        request["receiptId"] = args.receipt_id or str(uuid.uuid4())
+        print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
+    response = call(request)
     print_error(response)
+    if args.notice_only:
+        print("Workspace notice accepted only; not delivered to agent (no acknowledgment)")
+    else:
+        print(json.dumps(response))
 
 
 if __name__ == "__main__":
