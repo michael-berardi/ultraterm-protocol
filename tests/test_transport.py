@@ -128,6 +128,17 @@ class TransportTests(unittest.TestCase):
                 self.assertEqual(request.get('id'), 'SESSION-A')
                 self.assertNotIn('slot', request)
 
+    def test_committed_close_failure_says_the_close_happened(self):
+        reply = {'ok': False, 'committed': True, 'closed': {'slot': 3, 'id': 'S3'},
+                 'error': 'pane cleanup failed'}
+        result, request = self.exchange(json.dumps(reply).encode() + b'\n',
+                                        ['close', '--slot', '3', '--expected-id', 'S3', '--confirm'])
+        self.assertEqual(request['expectedId'], 'S3')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pane cleanup failed', result.stderr)
+        self.assertIn('committed', result.stderr)
+        self.assertIn('do not retry', result.stderr)
+
     def test_missing_and_nonexecutable_codec_fail_cleanly(self):
         for codec in [None, 'nonexecutable']:
             result, _ = self.exchange(b'{"ok":true,"text":"hello"}\n', ['inspect', '--slot', '2'], codec=codec)

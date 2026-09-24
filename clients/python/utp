@@ -223,7 +223,11 @@ def add_profile_commands(sub: argparse._SubParsersAction) -> None:
 
 def print_error(response: dict) -> None:
     if not response.get("ok"):
-        sys.exit(f"utp: {response.get('error', 'request failed')}")
+        message = f"utp: {response.get('error', 'request failed')}"
+        if response.get("committed") is True:
+            # Spec 3.6: the mutation committed although a later cleanup step failed.
+            message += "; the change was committed, so do not retry it; reconcile with 'utp list'"
+        sys.exit(message)
 
 
 def dynamic_tmux_slot() -> int | None:
@@ -364,7 +368,13 @@ def cleanup_opened_handoff(session: dict) -> None:
             file=sys.stderr,
         )
         return
-    if not response.get("ok"):
+    if not response.get("ok") and response.get("committed") is True:
+        print(
+            f"utp handoff: cleanup closed slot {session['slot']} ({session['id']}) but "
+            f"reported: {response.get('error', 'request failed')}",
+            file=sys.stderr,
+        )
+    elif not response.get("ok"):
         print(
             f"utp handoff: cleanup failed for slot {session['slot']} ({session['id']}): "
             f"{response.get('error', 'request failed')}",
