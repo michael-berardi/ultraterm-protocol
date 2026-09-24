@@ -669,10 +669,11 @@ def main() -> None:
 
     if args.cmd == "inspect":
         request = {"cmd": "inspect", "lines": args.lines, "raw": args.raw}
-        if args.slot is not None:
-            request["slot"] = args.slot
-        elif args.id:
+        # The id is the identity and takes precedence over the slot (spec 3.2).
+        if args.id:
             request["id"] = args.id
+        elif args.slot is not None:
+            request["slot"] = args.slot
         else:
             sys.exit("utp inspect: --slot or --id required")
         response = call(request)
@@ -706,10 +707,11 @@ def main() -> None:
 
     if args.cmd == "send":
         request = {"cmd": "send", "text": args.text, "enter": not args.no_enter}
-        if args.slot is not None:
-            request["slot"] = args.slot
-        elif args.id:
+        # Never drop an explicit id: it takes precedence over the slot.
+        if args.id:
             request["id"] = args.id
+        elif args.slot is not None:
+            request["slot"] = args.slot
         else:
             sys.exit("utp send: --slot or --id required")
         if args.expected_id:
