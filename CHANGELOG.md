@@ -16,6 +16,7 @@ All notable changes are documented here. This project follows Keep a Changelog a
 - Deliver `task.done` and addressed `message` payloads through the native conversation inbox only; nothing is typed into a manager PTY, and no receipt is presented as host acceptance, agent acknowledgment or proof of a model read.
 - Version the local manager route store as format 3 while the wire version stays 2; legacy slot-only records are not migrated.
 - Make confirmed handoff wait for the receiving session, register that exact worker session against the manager session ID from `list`, and pin packet submission to the captured worker session ID; a pre-submit failure (readiness timeout, registration error, cancellation) closes only the pane that handoff opened, identity-bound to the session ID it opened, while an attempted-but-unconfirmed submission keeps the worker and prints its session ID for the operator to reconcile.
+- `utp send` and `utp inspect` now honor `--id` when `--slot` is also given, as the spec's id precedence requires; previously the explicit session ID was silently dropped and the request went to whatever occupied the slot.
 - Add isolated Unix-socket Python CLI transport tests plus deterministic registration, compatibility and secure-failure CLI tests. No release, tag or publication yet.
 
 

@@ -118,6 +118,16 @@ class TransportTests(unittest.TestCase):
         result, _ = self.exchange(b'{"ok":false,"error":"not attached"}\n', ['inspect', '--slot', '2'])
         self.assertIn('not attached', result.stderr)
 
+    def test_explicit_id_is_never_dropped_for_slot(self):
+        for args, reply in [(['send', '--slot', '2', '--id', 'SESSION-A', 'hello'], b'{"ok":true}\n'),
+                            (['inspect', '--slot', '2', '--id', 'SESSION-A', '--no-uc'],
+                             b'{"ok":true,"text":"hello"}\n')]:
+            with self.subTest(cmd=args[0]):
+                result, request = self.exchange(reply, args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(request.get('id'), 'SESSION-A')
+                self.assertNotIn('slot', request)
+
     def test_missing_and_nonexecutable_codec_fail_cleanly(self):
         for codec in [None, 'nonexecutable']:
             result, _ = self.exchange(b'{"ok":true,"text":"hello"}\n', ['inspect', '--slot', '2'], codec=codec)
