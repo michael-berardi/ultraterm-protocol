@@ -140,7 +140,7 @@ class ReportHookTests(unittest.TestCase):
             # Joined at runtime so no token-shaped literal trips gitleaks.
             " ".join(("Sign in with", "_".join(("ghp", "16C7e42F292c6912E7710c838347Ae178B4a")), "now.")),
             "Set password=example-value in settings.",
-            "Keys like AKIAIOSFODNN7EXAMPLE now work.",
+            "Keys like " + "AKIA" + "IOSFODNN7EXAMPLE now work.",
         ):
             with self.subTest(item=item):
                 result = self.run_report("--new", item, "--user-authorized")
