@@ -59,6 +59,15 @@ TECHNICAL_REPORT_NOISE_RE = re.compile(
     r"deploy(?:ed|ment)?|tests?\s+passed|test suite|testing\s+(?:passed|completed)|pytest|vitest|eslint|typescript|"
     r"cloudflare worker|(?:internal|build) workflow|version id)\b"
 )
+# Abbreviated or full commit hashes: 7-40 hex characters mixing digits and letters.
+COMMIT_ID_RE = re.compile(r"(?i)\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b")
+# Well-known credential shapes and explicit secret assignments.
+PROTECTED_VALUE_RE = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}"
+    r"|AKIA[0-9A-Z]{16}|\d{6,}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.)"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|(?i:\b(?:password|passwd|secret|token|api[_-]?key)\s*=\s*\S)"
+)
 MAX_REPORT_ITEMS = 24
 MAX_SECTION_ITEMS = 12
 MAX_REPORT_ITEM_CHARS = 240
@@ -69,15 +78,17 @@ def normalize_report_items(values: list[str], name: str) -> list[str]:
     seen = set()
     for raw in values:
         text = raw.strip()
-        if "\n" in text or "\r" in text:
+        if len(text.splitlines()) > 1:
             raise SystemExit(f"utp report: --{name} items must stay on a single line")
         text = re.sub(r"^(?:[-*•]\s*)", "", text).strip()
         if not text or len(text) > MAX_REPORT_ITEM_CHARS:
             raise SystemExit(
                 f"utp report: --{name} items must contain 1-{MAX_REPORT_ITEM_CHARS} characters"
             )
-        if TECHNICAL_REPORT_NOISE_RE.search(text):
+        if TECHNICAL_REPORT_NOISE_RE.search(text) or COMMIT_ID_RE.search(text):
             raise SystemExit(f"utp report: --{name} contains technical workflow noise")
+        if PROTECTED_VALUE_RE.search(text):
+            raise SystemExit(f"utp report: --{name} contains a protected value")
         key = text.casefold()
         if key not in seen:
             seen.add(key)
