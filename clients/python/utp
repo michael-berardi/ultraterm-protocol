@@ -41,12 +41,10 @@ import json
 import os
 import re
 import socket
-import tempfile
 import stat
 import subprocess
 import sys
 import time
-import uuid
 
 SOCKET_PATH = os.path.expanduser("~/.ultraterm/utp.sock")
 REPORT_HOOK_PATH = os.path.expanduser(
@@ -221,6 +219,12 @@ def add_profile_commands(sub: argparse._SubParsersAction) -> None:
     remove.add_argument("name")
 
 
+def new_receipt_id() -> str:
+    import uuid  # deferred: only receipt-bearing messages need it
+
+    return str(uuid.uuid4())
+
+
 def print_error(response: dict) -> None:
     if not response.get("ok"):
         message = f"utp: {response.get('error', 'request failed')}"
@@ -283,6 +287,8 @@ def handoff_packet_path(value: str) -> str:
     # /tmp and the platform temp dir (macOS TMPDIR lives under /var/folders,
     # a symlink family away from /tmp) are both acceptable staging areas.
     roots = [os.path.realpath("/tmp")]
+    import tempfile  # deferred: only handoff needs it, and it slows every call
+
     platform_temp = os.path.realpath(tempfile.gettempdir())
     if platform_temp not in roots:
         roots.append(platform_temp)
@@ -983,7 +989,7 @@ def main() -> None:
             request["to"] = args.to
         if args.expected_id:
             request["expectedId"] = args.expected_id
-        request["receiptId"] = args.receipt_id or str(uuid.uuid4())
+        request["receiptId"] = args.receipt_id or new_receipt_id()
         print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
         response = call(request)
         print_error(response)
@@ -995,7 +1001,7 @@ def main() -> None:
         request["expectedId"] = args.expected_id
     request["noticeOnly"] = args.notice_only
     if not args.notice_only:
-        request["receiptId"] = args.receipt_id or str(uuid.uuid4())
+        request["receiptId"] = args.receipt_id or new_receipt_id()
         print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
     response = call(request)
     print_error(response)
