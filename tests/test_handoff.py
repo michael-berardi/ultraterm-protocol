@@ -86,6 +86,17 @@ class HandoffPacketTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "1-16384"):
             UTP.handoff_packet_path(str(self.packet))
 
+    def test_rejects_control_characters_in_packet_path(self):
+        # The path is typed into the worker PTY; a CR would submit a truncated,
+        # never-validated path such as /tmp/evil as its own instruction.
+        for name in ("evil\rx.md", "evil\nx.md", "evil\x1b[2Jx.md", "evil\x85x.md"):
+            with self.subTest(name=repr(name)):
+                packet = self.root / name
+                packet.write_text("# Goal\nContinue the verified task.\n")
+                packet.chmod(0o600)
+                with self.assertRaisesRegex(SystemExit, "control characters"):
+                    UTP.handoff_packet_path(str(packet))
+
 
 if __name__ == "__main__":
     unittest.main()

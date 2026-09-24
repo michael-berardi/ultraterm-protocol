@@ -282,6 +282,10 @@ def handoff_packet_path(value: str) -> str:
             continue
     if not inside:
         raise SystemExit("utp handoff: packet must resolve to a file under /tmp")
+    # The resolved path is typed into the worker PTY: a CR/LF would submit a
+    # truncated, unvalidated path and escape sequences would reach the TUI.
+    if re.search(r"[\x00-\x1f\x7f-\x9f]", resolved):
+        raise SystemExit("utp handoff: packet path must not contain control characters")
     try:
         details = os.lstat(path)
     except FileNotFoundError:

@@ -103,7 +103,7 @@ version stays 2, and legacy slot-only records are not migrated into it.
 
 ## Universal handoff
 
-Create one private packet under `/tmp`, `chmod 600` it, and keep it at or below 16 KiB. Include: Goal; Current state; Completed; every Remaining todo; Decisions and constraints; Resources and artifacts; Next action. Exclude credentials and obsolete transcript history.
+Create one private packet under `/tmp`, `chmod 600` it, and keep it at or below 16 KiB. Its path must not contain control characters, because the path is typed into the worker terminal. Include: Goal; Current state; Completed; every Remaining todo; Decisions and constraints; Resources and artifacts; Next action. Exclude credentials and obsolete transcript history.
 
 Same-slot handoff dry run:
 
