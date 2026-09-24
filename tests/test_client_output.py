@@ -104,6 +104,21 @@ class ClientOutputTests(unittest.TestCase):
         self.assertEqual(result.stdout, "saved locally\n")
         self.assertEqual(self.uc_args.read_text().splitlines(), ["telemetry", "--rate", "12.5"])
 
+    def test_savings_reports_uc_telemetry_failure(self):
+        self.uc.write_text("#!/bin/sh\necho 'telemetry store unreadable' >&2\nexit 3\n")
+
+        result = subprocess.run(
+            [str(CLIENT), "savings"],
+            env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("UC telemetry failed: telemetry store unreadable", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
