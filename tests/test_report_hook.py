@@ -377,5 +377,15 @@ class ReportHookTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
 
+    def test_rejects_readable_hook_directory(self):
+        # Private means no group or other access at all, not just no writes.
+        self.root.chmod(0o755)
+
+        result = self.run_authorized_report()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("directory must be current-user-owned and private", result.stderr)
+        self.assertFalse(self.output.exists())
+
 if __name__ == "__main__":
     unittest.main()
