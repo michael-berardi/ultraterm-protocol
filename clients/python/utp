@@ -668,6 +668,8 @@ def main() -> None:
         proc = run_uc(
             command, capture_output=True, text=True, timeout=30,
         )
+        if proc.returncode != 0:
+            sys.exit(f"utp: UC telemetry failed: {proc.stderr.strip()}")
         sys.stdout.write(proc.stdout)
         return
 
