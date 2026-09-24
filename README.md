@@ -136,7 +136,7 @@ utp report \
   --user-authorized
 ```
 
-Each repeated flag becomes one bullet. The recipient sees only the non-empty `What's new`, `What's changed`, and `Fixes` sections. Text reports reject paragraphs, technical workflow details, verification chatter, deployment mechanics, commit identifiers (including bare hashes), rollback instructions, and protected values such as credential-shaped tokens. The route is a local alias; a user-owned hook keeps destination IDs, provider authentication, project labels, and delivery outside UTP. The client invokes the executable at `~/.ultraterm/report-hook` (override with `UTP_REPORT_HOOK`) and sends the JSON payload on standard input.
+Each repeated flag becomes one bullet. The recipient sees only the non-empty `What's new`, `What's changed`, and `Fixes` sections. Text reports reject paragraphs, technical workflow details, verification chatter, deployment mechanics, commit identifiers (including bare hashes), rollback instructions, and protected values such as credential-shaped tokens. The route is a local alias; a user-owned hook keeps destination IDs, provider authentication, project labels, and delivery outside UTP. The client invokes the executable at `~/.ultraterm/report-hook` (override with `UTP_REPORT_HOOK`) and sends the JSON payload on standard input. The hook must live in a directory you own with no group or other access (`chmod 700`).
 
 ### Files and images
 
