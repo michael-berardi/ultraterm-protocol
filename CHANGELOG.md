@@ -21,6 +21,7 @@ All notable changes are documented here. This project follows Keep a Changelog a
 - `utp handoff` rejects a packet path containing control characters before sending anything. The path is typed into the worker PTY, and a CR or LF inside it would submit a truncated path that was never validated (for example `/tmp/evil` from `/tmp/evil\rx.md`).
 - Text report items now enforce the documented rejection of commit identifiers and protected values: bare 7–40 character hex hashes, common credential shapes (GitHub, OpenAI-style, Slack, AWS access key, chat-bot tokens, JWTs, private-key headers) and `password=`/`token=` style assignments. Items containing Unicode line separators are rejected as multi-line. Previously only the literal word "commit" was caught, and these values were delivered to the hook.
 - Examples: `worker-complete.sh` no longer puts apostrophes inside `"${VAR:?...}"`. Under bash, including macOS `/bin/sh`, they mangled the messages and swallowed the `MANAGER_SESSION_ID` guard. `manager-delegate.sh` refuses a symlinked packet instead of `chmod`-ing the link's target.
+- A failure reply carrying `committed:true` (spec 3.6: `close` removed the session but a later cleanup step failed) is now reported as committed, with advice not to retry. Handoff cleanup reports it as a close rather than as `cleanup failed`.
 - Add isolated Unix-socket Python CLI transport tests plus deterministic registration, compatibility and secure-failure CLI tests. No release, tag or publication yet.
 
 

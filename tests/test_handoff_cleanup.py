@@ -245,6 +245,30 @@ class HandoffCliTests(unittest.TestCase):
         self.assertIn("cleanup failed for slot 2 (worker-id)", stderr)
         self.assertIn("target changed", stderr)
 
+    def test_committed_cleanup_is_not_reported_as_failed(self):
+        self.start(
+            by_command(
+                {
+                    "list": {"ok": True, "sessions": [MANAGER]},
+                    "open": {"ok": True, "session": WORKER},
+                    "inspect": {"ok": True, "text": ""},
+                    "close": {
+                        "ok": False,
+                        "committed": True,
+                        "closed": WORKER,
+                        "error": "pane cleanup failed",
+                    },
+                }
+            )
+        )
+
+        error, _, stderr = self.run_cli(self.handoff("--new-slot"), expect_exit=True)
+
+        self.assertIn("did not produce stable output", str(error))
+        self.assertNotIn("cleanup failed for slot", stderr)
+        self.assertIn("cleanup closed slot 2 (worker-id)", stderr)
+        self.assertIn("pane cleanup failed", stderr)
+
     # --- identity-bound submission -------------------------------------------
 
     def test_new_slot_submission_is_pinned_to_the_opened_session_id(self):
