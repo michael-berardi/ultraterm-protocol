@@ -6,7 +6,11 @@ WORKER_SLOT=${WORKER_SLOT:-2}
 PROFILE=${PROFILE:-quality}
 PACKET=${1:-/tmp/ultraterm-handoff.md}
 
-test -f "$PACKET"
+# chmod follows symlinks, so refuse one before changing any mode.
+if [ -L "$PACKET" ] || [ ! -f "$PACKET" ]; then
+  echo "manager-delegate.sh: $PACKET must be a regular file, not a symlink" >&2
+  exit 1
+fi
 chmod 600 "$PACKET"
 
 # Safe suggestion only. After explicit user approval, repeat the printed plan

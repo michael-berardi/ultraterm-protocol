@@ -7,8 +7,9 @@ SUMMARY=${1:-"Focused regression suite passed."}
 
 # Session IDs, never slot numbers, identify the sessions. Read both from
 # `utp list` first: the worker's own ID and the manager's current ID.
-: "${WORKER_SESSION_ID:?Set WORKER_SESSION_ID to this worker's session ID from utp list}"
-: "${MANAGER_SESSION_ID:?Set MANAGER_SESSION_ID to the manager's session ID from utp list}"
+# No apostrophes in these messages: bash parses ' inside "${VAR:?...}" as a quote.
+: "${WORKER_SESSION_ID:?Set WORKER_SESSION_ID to the session ID of this worker from utp list}"
+: "${MANAGER_SESSION_ID:?Set MANAGER_SESSION_ID to the session ID of the manager from utp list}"
 
 # Registration pins both native conversations and persists, so later
 # completions need only task-done. Completions go to the manager's native
