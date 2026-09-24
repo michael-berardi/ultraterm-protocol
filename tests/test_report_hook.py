@@ -121,6 +121,57 @@ class ReportHookTests(unittest.TestCase):
         self.assertIn("technical workflow noise", result.stderr)
         self.assertFalse(self.output.exists())
 
+    def test_report_rejects_bare_commit_identifiers(self):
+        for item in (
+            "The crash introduced in 9fceb02d0ae598e95dc970b74767f19372d61af8 no longer occurs.",
+            "The crash from a1b2c3d no longer occurs.",
+        ):
+            with self.subTest(item=item):
+                result = self.run_report("--fixed", item, "--user-authorized")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("technical workflow noise", result.stderr)
+                self.assertFalse(self.output.exists())
+
+    def test_report_rejects_protected_values(self):
+        # Shape-only fixtures; none of these is a real credential.
+        for item in (
+            "The bot now uses 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0.",
+            # Joined at runtime so no token-shaped literal trips gitleaks.
+            " ".join(("Sign in with", "_".join(("ghp", "16C7e42F292c6912E7710c838347Ae178B4a")), "now.")),
+            "Set password=example-value in settings.",
+            "Keys like AKIAIOSFODNN7EXAMPLE now work.",
+        ):
+            with self.subTest(item=item):
+                result = self.run_report("--new", item, "--user-authorized")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("protected value", result.stderr)
+                self.assertFalse(self.output.exists())
+
+    def test_report_accepts_plain_language_near_misses(self):
+        result = self.run_report(
+            "--new",
+            "Password reset emails now arrive faster.",
+            "--new",
+            "Sign-in token lifetime is now 24 hours.",
+            "--changed",
+            "Video supports 1080p60 and order 1234567 ships today.",
+            "--user-authorized",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(json.loads(self.output.read_text())["new"]), 2)
+
+    def test_report_items_reject_unicode_line_breaks(self):
+        for item in ("First line Second line", "First line\x0bSecond line"):
+            with self.subTest(item=repr(item)):
+                result = self.run_report("--new", item, "--user-authorized")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("single line", result.stderr)
+                self.assertFalse(self.output.exists())
+
     def test_report_rejects_legacy_verification_flag(self):
         result = self.run_report(
             "--new",
