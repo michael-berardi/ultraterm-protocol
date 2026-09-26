@@ -80,8 +80,15 @@ class RegistrationTestCase(unittest.TestCase):
     def run_client(self, args, env=None, server=None):
         if server is not None:
             self.addCleanup(server.stop)
+        # Tests must not inherit the caller's terminal identity: running the
+        # suite inside UltraTerm or tmux would otherwise change slot resolution.
+        inherited = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("ULTRATERM_", "TMUX"))
+        }
         environment = {
-            **os.environ,
+            **inherited,
             "HOME": str(self.home),
             "TMUX_PANE": "",
             "UC_BIN": str(self.home / "uc"),

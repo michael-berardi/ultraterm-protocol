@@ -4,27 +4,37 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
-### 2.2.0 candidate
+## [2.2.1] - 2026-09-26
+
+Client-only release; the wire version stays 2.
+
+### Security
+
+- `utp send` and `utp inspect` now honor `--id` when `--slot` is also given, as the spec's id precedence requires; previously the explicit session ID was silently dropped and the request went to whatever occupied the slot.
+- `utp handoff` rejects a packet path containing control characters before sending anything. The path is typed into the worker PTY, and a CR or LF inside it would submit a truncated path that was never validated (for example `/tmp/evil` from `/tmp/evil\rx.md`).
+- Text report items now enforce the documented rejection of commit identifiers and protected values: bare 7–40 character hex hashes, common credential shapes (GitHub, OpenAI-style, Slack, AWS access key, chat-bot tokens, JWTs, private-key headers) and `password=`/`token=` style assignments. Items containing Unicode line separators are rejected as multi-line. Previously only the literal word "commit" was caught, and these values were delivered to the hook.
+- The report hook's directory must now be private as the spec requires: any group or other access is refused (`chmod 700`). Previously only group/world write access was refused, so a readable `0755` directory passed.
+
+### Fixed
+
+- `utp savings` exits nonzero with the codec's error when `uc telemetry` fails; it previously printed nothing and exited 0.
+- Examples: `worker-complete.sh` no longer puts apostrophes inside `"${VAR:?...}"`. Under bash, including macOS `/bin/sh`, they mangled the messages and swallowed the `MANAGER_SESSION_ID` guard. `manager-delegate.sh` refuses a symlinked packet instead of `chmod`-ing the link's target.
+- A failure reply carrying `committed:true` (spec 3.6: `close` removed the session but a later cleanup step failed) is now reported as committed, with advice not to retry. Handoff cleanup reports it as a close rather than as `cleanup failed`.
+- Defer the `tempfile` and `uuid` imports to the commands that use them, cutting about 5 ms (8–12%) from every `utp` invocation.
+
+## [2.2.0] - 2026-09-20
 
 - Add read-only `diagnose` JSON diagnostics and `utp --version` (`2.2.0`); wire version remains 2.
 - Bound client reply memory and exchange duration; cleanly reject timeout, refusal, disconnect, truncated, oversized, malformed and invalid inspect replies.
 - Never replay requests automatically; report unknown mutation outcomes after sending begins and document read-only reconciliation.
 - Handle unavailable/nonexecutable optional UC codecs cleanly, preserving explicit `--no-uc` behavior.
-- `utp savings` exits nonzero with the codec's error when `uc telemetry` fails; it previously printed nothing and exited 0.
 - Merge newer vendored harness-scoped profiles, identity checks, native-identity manager registration and receipt-aware messaging into the canonical executable client.
 - Require `utp register-manager --from-id WORKER_SESSION_ID --expected-id MANAGER_SESSION_ID` and `utp task-done --from-id WORKER_SESSION_ID`; an explicit `task-done --to MANAGER_SLOT` additionally requires `--expected-id`. Session IDs come from `list` and are never inferred from a slot.
 - Pin every worker-to-manager route to both native agent conversations. Registrations persist across an app restart and across slot renumbering, a replaced terminal never inherits an older route, and a stale or unauthenticated conversation is rejected instead of redirected.
 - Deliver `task.done` and addressed `message` payloads through the native conversation inbox only; nothing is typed into a manager PTY, and no receipt is presented as host acceptance, agent acknowledgment or proof of a model read.
 - Version the local manager route store as format 3 while the wire version stays 2; legacy slot-only records are not migrated.
 - Make confirmed handoff wait for the receiving session, register that exact worker session against the manager session ID from `list`, and pin packet submission to the captured worker session ID; a pre-submit failure (readiness timeout, registration error, cancellation) closes only the pane that handoff opened, identity-bound to the session ID it opened, while an attempted-but-unconfirmed submission keeps the worker and prints its session ID for the operator to reconcile.
-- `utp send` and `utp inspect` now honor `--id` when `--slot` is also given, as the spec's id precedence requires; previously the explicit session ID was silently dropped and the request went to whatever occupied the slot.
-- `utp handoff` rejects a packet path containing control characters before sending anything. The path is typed into the worker PTY, and a CR or LF inside it would submit a truncated path that was never validated (for example `/tmp/evil` from `/tmp/evil\rx.md`).
-- Text report items now enforce the documented rejection of commit identifiers and protected values: bare 7–40 character hex hashes, common credential shapes (GitHub, OpenAI-style, Slack, AWS access key, chat-bot tokens, JWTs, private-key headers) and `password=`/`token=` style assignments. Items containing Unicode line separators are rejected as multi-line. Previously only the literal word "commit" was caught, and these values were delivered to the hook.
-- Examples: `worker-complete.sh` no longer puts apostrophes inside `"${VAR:?...}"`. Under bash, including macOS `/bin/sh`, they mangled the messages and swallowed the `MANAGER_SESSION_ID` guard. `manager-delegate.sh` refuses a symlinked packet instead of `chmod`-ing the link's target.
-- A failure reply carrying `committed:true` (spec 3.6: `close` removed the session but a later cleanup step failed) is now reported as committed, with advice not to retry. Handoff cleanup reports it as a close rather than as `cleanup failed`.
-- The report hook's directory must now be private as the spec requires: any group or other access is refused (`chmod 700`). Previously only group/world write access was refused, so a readable `0755` directory passed.
-- Defer the `tempfile` and `uuid` imports to the commands that use them, cutting about 5 ms (8–12%) from every `utp` invocation.
-- Add isolated Unix-socket Python CLI transport tests plus deterministic registration, compatibility and secure-failure CLI tests. No release, tag or publication yet.
+- Add isolated Unix-socket Python CLI transport tests plus deterministic registration, compatibility and secure-failure CLI tests.
 
 
 ## [2.1.0] - 2026-08-30

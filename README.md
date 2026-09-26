@@ -17,9 +17,9 @@ link `clients/python/utp` under a different name or location such as
 standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
 also available.
 
-## 2.2.0 candidate (unreleased)
+## Current release
 
-`utp --version` reports `2.2.0`; the wire remains v2 and no new command, daemon or dependency is required. Worker-to-manager registration now requires the worker and manager session IDs captured from `list`, pins both native agent conversations, survives app restarts and slot renumbering, and never types a completion into a manager PTY.
+The current release is 2.2.1 (`utp --version`); the wire protocol is v2. See the [changelog](CHANGELOG.md). Since 2.2.0, no new command, daemon or dependency has been required. Worker-to-manager registration now requires the worker and manager session IDs captured from `list`, pins both native agent conversations, survives app restarts and slot renumbering, and never types a completion into a manager PTY.
 
 ## Protocol v2
 
