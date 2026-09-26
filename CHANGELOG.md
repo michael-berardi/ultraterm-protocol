@@ -4,6 +4,11 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
+### Added
+
+- Receipts say whether the recipient model read a note. A recorded receipt reports `modelRead`/`readAt` when the recipient model first responded after the recorded entry and `agentAcknowledged`/`acknowledgedAt` when it then produced output. `deliveryState` names every state (`recorded-awaiting-read`, `read`, `acknowledged`, …) and `guidance` says why a note is unread and what happens next.
+- `message.receipt` waits accept `waitUntil`: `recorded` (default), `read` or `acknowledged`. `utp receipt ID --wait SECONDS --until read` waits for the model to read it and exits nonzero on timeout with the current state and reason.
+
 ## [2.2.1] - 2026-09-26
 
 Client-only release; the wire version stays 2.
