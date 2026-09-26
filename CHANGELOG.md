@@ -4,6 +4,11 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-26
+
+The wire version stays 2; servers that predate these fields keep returning
+`modelRead:false` and reject `waitUntil`, which the client reports plainly.
+
 ### Added
 
 - Receipts say whether the recipient model read a note. A recorded receipt reports `modelRead`/`readAt` when the recipient model first responded after the recorded entry and `agentAcknowledged`/`acknowledgedAt` when it then produced output. `deliveryState` names every state (`recorded-awaiting-read`, `read`, `acknowledged`, …) and `guidance` says why a note is unread and what happens next.

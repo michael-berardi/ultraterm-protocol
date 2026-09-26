@@ -68,7 +68,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), response)
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
-        self.assertEqual(result.stdout.strip(), '2.2.1')
+        self.assertEqual(result.stdout.strip(), '2.3.0')
 
     def test_receipt_waits_for_the_recipient_model_to_read(self):
         rid = '55555555-5555-4555-8555-555555555555'
