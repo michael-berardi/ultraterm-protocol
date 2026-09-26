@@ -1,31 +1,86 @@
-# UltraTerm Terminal Protocol
+# UltraTerm Terminal Protocol (UTP)
 
-UltraTerm Terminal Protocol (UTP) lets local agents inspect and control persistent terminal slots, hand work between profiles and workers, coordinate managers with multiple workers, and send authorized friendly reports through one same-user local interface.
+<p align="center">
+  <strong>A small, same-user control protocol that lets local agents see and drive persistent terminal sessions safely.</strong>
+</p>
 
-## Install the reference client
+<p align="center">
+  <a href="https://github.com/michael-berardi/ultraterm-protocol/releases/latest"><img src="https://img.shields.io/github/v/release/michael-berardi/ultraterm-protocol?label=release" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/michael-berardi/ultraterm-protocol" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/wire-v2-blue" alt="Wire protocol v2" />
+  <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
+</p>
 
-UltraTerm installs and updates the client at `~/.ultraterm/bin/utp` during
-setup. Put that app-managed directory on your PATH:
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-look">Quick look</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="protocols/v2.md">Specification</a> ·
+  <a href="#security">Security</a>
+</p>
+
+UTP is the local control interface of [UltraTerm](https://implosecybernetics.com/software/),
+a terminal workspace for running coding agents side by side. It lets an agent
+list the terminals on your machine, read a bounded slice of their output, send
+input, open or close terminals, hand work to a fresh worker, and report back to
+the agent that delegated it.
+
+Everything happens over JSON Lines on a private Unix socket. There is no TCP
+listener, no daemon to install and no runtime dependency beyond Python's
+standard library.
+
+- **Safe by default.** Every destructive command is a dry run until you confirm
+  it with the exact session ID the dry run printed. A reused slot or stale ID is
+  refused.
+- **Identity, not slot numbers.** Manager and worker routes are pinned to the
+  real agent conversations, so a renumbered or replaced terminal never receives
+  someone else's work.
+- **Nothing typed behind your back.** Completions and messages go to the
+  agent's native inbox, never into a terminal as keystrokes.
+- **Honest failures.** The client never retries on its own. When a mutation's
+  outcome is unknown it says so and tells you how to reconcile.
+
+## Install
+
+UltraTerm installs and updates the reference client at `~/.ultraterm/bin/utp`.
+Put that directory on your `PATH`:
 
 ```sh
 export PATH="$HOME/.ultraterm/bin:$PATH"  # add to your shell profile to persist
 ```
 
-Do not overwrite the app-managed binary. To try the checked-in source client,
-link `clients/python/utp` under a different name or location such as
-`$HOME/.local/bin/utp-source`. The source client matches the installed client;
-standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
+To try the source client in this repository without replacing the managed
+binary, link it under another name:
+
+```sh
+git clone https://github.com/michael-berardi/ultraterm-protocol.git
+ln -s "$PWD/ultraterm-protocol/clients/python/utp" ~/.local/bin/utp-source
+utp-source --version
+```
+
+Standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
 also available.
 
-## Current release
+## Quick look
 
-The current release is 2.2.1 (`utp --version`); the wire protocol is v2. See the [changelog](CHANGELOG.md). Since 2.2.0, no new command, daemon or dependency has been required. Worker-to-manager registration now requires the worker and manager session IDs captured from `list`, pins both native agent conversations, survives app restarts and slot renumbering, and never types a completion into a manager PTY.
+```sh
+utp list                                   # terminals, profiles and session IDs
+utp inspect --slot 2 --no-uc               # bounded recent output from slot 2
+utp message --to 2 --expected-id SESSION_ID "Rebase onto main when you finish."
+utp close --slot 3                         # dry run: prints the session ID
+utp close --slot 3 --expected-id SESSION_ID --confirm
+```
+
+The current release is 2.2.1 (`utp --version`); the wire protocol is v2. See
+the [changelog](CHANGELOG.md).
 
 ## Protocol v2
 
 UTP v2 uses JSON Lines over `~/.ultraterm/utp.sock`. The directory is mode `0700`; the socket is mode `0600`; there is no TCP listener. Every success contains `"ok":true`; every failure contains `"ok":false` and a human-readable `error`.
 
 The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.md`](protocols/v1.md) remains the immutable 1.0 contract.
+
+### Commands
 
 | Client command | Behavior |
 |---|---|
@@ -174,10 +229,6 @@ Redaction deletes only the bot's own messages, only by explicit `--message-id` (
 
 UTP is command-capable. Servers must enforce the same-user Unix socket, directory mode `0700`, socket mode `0600`, bounded inputs, root-confined profile operations, identity-bound destructive confirmation, and symlink-safe private handoff packets. Never expose, proxy, or forward UTP over a network. Never place credentials, destination IDs, or private customer data in protocol traffic, examples, logs, fixtures, issues, or commits.
 
-## Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). V1 remains frozen; generalized identity-bound orchestration is versioned as v2.
-
 ## Diagnostics and lifecycle recovery
 
 Run `utp diagnose` to check the control socket without inspecting terminal output.
@@ -210,3 +261,11 @@ re-registration rather than reuse. Let the user restore the app, diagnose again,
 and obtain a fresh inventory; report uncertainty if observed state cannot
 establish the prior mutation's outcome. Diagnostics do not read prompts, terminal
 contents, credentials, or private paths.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The v1 contract is frozen; identity-bound orchestration is versioned as v2. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)
