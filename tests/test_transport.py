@@ -68,7 +68,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), response)
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
-        self.assertEqual(result.stdout.strip(), '2.2.0')
+        self.assertEqual(result.stdout.strip(), '2.2.1')
 
     def test_bounded_invalid_replies(self):
         for reply, error in [(b'', 'disconnected'), (b'{"ok":true}', 'truncated'),
