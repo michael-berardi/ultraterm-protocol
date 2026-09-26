@@ -17,6 +17,10 @@ link `clients/python/utp` under a different name or location such as
 standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
 also available.
 
+## 2.2.0 candidate (unreleased)
+
+`utp --version` reports `2.2.0`; the wire remains v2. No daemon or new dependency is required.
+
 ## Protocol v2
 
 UTP v2 uses JSON Lines over `~/.ultraterm/utp.sock`. The directory is mode `0700`; the socket is mode `0600`; there is no TCP listener. Every success contains `"ok":true`; every failure contains `"ok":false` and a human-readable `error`.
@@ -25,25 +29,26 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 
 | Client command | Behavior |
 |---|---|
+| `utp diagnose` | Read-only JSON diagnostics: release/wire versions, connection counts and bounded aggregate health counters; no terminal contents or private paths. |
 | `utp list` | Read-only attached slot/session inventory. |
 | `utp inspect --slot N` | Read-only bounded PTY history; model-readable UltraCompact output by default, or plain text with `--no-uc`. |
 | `utp savings [--rate DOLLARS_PER_MILLION]` | Read local UltraCompact telemetry and summarize saved tokens for the day, 7 days, 30 days, and all time. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
-| `utp message --to N TEXT` | Neutral addressed notice; no prompt input or broadcast. |
+| `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. A receipt records mailbox state only: neither proves native host acceptance, agent acknowledgment or that a model read the message. |
 | `utp open --profile P` | Dry-run the lowest-free-slot assignment; confirmation attaches its pane. |
 | `utp close --slot N` | Dry-run an exact slot removal; confirmation requires the printed session ID. |
 | `utp switch-profile P --slot N` | Dry-run an identity-bound in-place profile handoff. |
 | `utp register-manager --slot M --from W` | Register worker W to manager M; many workers may share one manager. |
-| `utp task-done --from W --summary TEXT` | Deliver worker completion to its manager notice and PTY. |
+| `utp task-done --from W --summary TEXT` | Queue completion to its manager inbox; query its receipt for delivery state. |
 | `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
-| `utp profiles ...` | List, create, or remove universal OMP profiles. |
+| `utp profiles ...` | List harness-scoped profiles; create/remove require `--adapter omp`. |
 | `utp report ...` | One authorized friendly text report, file, or image through a private local route hook. |
 | `utp redact ...` | Delete the bot's own prior messages by explicit ID through the same hook; audit-logged. |
 
 Profile creation may include a provider-neutral ordered routing list:
 
 ```sh
-utp profiles create quality provider/model high \
+utp profiles create --adapter omp quality provider/model high \
   --routing upstream/primary,upstream/fallback
 ```
 
@@ -150,3 +155,34 @@ UTP is command-capable. Servers must enforce the same-user Unix socket, director
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). V1 remains frozen; generalized identity-bound orchestration is versioned as v2.
+
+## Diagnostics and lifecycle recovery
+
+Run `utp diagnose` to check the control socket without inspecting terminal output.
+An older server may reject this additive command; that does not change v2 compatibility.
+The CLI bounds a reply to 1 MiB and the exchange to a 10-second deadline. It reports
+missing/refused sockets, timeout, disconnect, truncated lines, invalid JSON, and invalid
+reply envelopes without Python tracebacks. A missing/nonexecutable optional UC codec
+is a clean error; use `inspect --no-uc` for plain text (no silent compression fallback).
+
+The client never automatically retries a request. Before any request bytes are sent,
+a connection failure means no request was sent. Once sending starts, a failed mutation
+has an **unknown outcome**, even on timeout or malformed reply: do not blindly repeat
+`send`, confirmed `open`/`close`/`switch-profile`, or a composed handoff. Use read-only
+`diagnose`, `list`, and receipt lookup to reconcile first. Receipt IDs are useful only
+with server-supported deduplication; do not infer arbitrary mutation idempotence.
+Read-only queries can be retried manually after connectivity returns. Fresh dry runs
+and session IDs are required before a newly authorized destructive operation.
+
+An app restart or lifecycle interruption can invalidate the socket and session identity.
+The GUI reconnects by respawning each terminal's PTY connection, which assigns a fresh
+connection UUID; `list` IDs are therefore not stable across a reconnect and MUST be
+rediscovered before any identity-bound `send`, `close`, `switch-profile` or handoff.
+Do not assume a previously printed session ID still names that terminal. Long-lived
+harnesses hosted in a persistent tmux server may keep the same agent process/PID across
+reconnect, but that is not connection identity and must not be treated as proof the
+same connection, inbox binding or pending message survived. Do not delete sockets,
+restart terminals, or replay work automatically. Let the user restore the app, diagnose
+again, and obtain a fresh inventory; report uncertainty if observed state cannot
+establish the prior mutation's outcome. Diagnostics do not read prompts, terminal
+contents, credentials, or private paths.
