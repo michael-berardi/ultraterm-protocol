@@ -4,6 +4,16 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ## [Unreleased]
 
+### 2.2.0 candidate
+
+- Add read-only `diagnose` JSON diagnostics and `utp --version` (`2.2.0`); wire version remains 2.
+- Bound client reply memory and exchange duration; cleanly reject timeout, refusal, disconnect, truncated, oversized, malformed and invalid inspect replies.
+- Never replay requests automatically; report unknown mutation outcomes after sending begins and document read-only reconciliation.
+- Handle unavailable/nonexecutable optional UC codecs cleanly, preserving explicit `--no-uc` behavior.
+- Merge newer vendored harness-scoped profiles, identity checks and receipt-aware messaging into the canonical executable client.
+- Add isolated Unix-socket Python CLI transport tests. No release/tag/publication yet.
+
+
 ## [2.1.0] - 2026-08-30
 
 ### Added
