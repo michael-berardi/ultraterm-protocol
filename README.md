@@ -89,8 +89,8 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | `utp inspect --slot N` | Read-only bounded PTY history; model-readable UltraCompact output by default, or plain text with `--no-uc`. |
 | `utp savings [--rate DOLLARS_PER_MILLION]` | Read local UltraCompact telemetry and summarize saved tokens for the day, 7 days, 30 days, and all time. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
-| `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. A receipt records mailbox state only: neither proves native host acceptance, agent acknowledgment or that a model read the message. |
-| `utp receipt RECEIPT_ID` | Read the stored state of one durable message or completion receipt. |
+| `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. |
+| `utp receipt RECEIPT_ID [--wait SECONDS] [--until recorded\|read\|acknowledged]` | Read a receipt: recorded in the recipient conversation, read by the recipient model (`modelRead`, `readAt`), acknowledged by its response. `--wait` blocks up to 120 s for the `--until` state and exits nonzero on timeout, stating the current state and why. |
 | `utp open --profile P` | Dry-run the lowest-free-slot assignment; confirmation attaches its pane. |
 | `utp close --slot N` | Dry-run an exact slot removal; confirmation requires the printed session ID. |
 | `utp switch-profile P --slot N` | Dry-run an identity-bound in-place profile handoff. |

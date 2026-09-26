@@ -70,6 +70,23 @@ class TransportTests(unittest.TestCase):
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
         self.assertEqual(result.stdout.strip(), '2.2.1')
 
+    def test_receipt_waits_for_the_recipient_model_to_read(self):
+        rid = '55555555-5555-4555-8555-555555555555'
+        read = dict(ok=True, receiptId=rid, recorded=True, modelRead=True, readAt=1790406005000,
+                    agentAcknowledged=False, deliveryState='read', waitSupported=True, waitUntil='read', waitSatisfied=True)
+        result, request = self.exchange(json.dumps(read).encode() + b'\n', ['receipt', rid, '--wait', '30', '--until', 'read'])
+        self.assertEqual(request, {'cmd': 'message.receipt', 'receiptId': rid, 'waitMs': 30000, 'waitUntil': 'read'})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)['modelRead'], True)
+        # Not read within the wait: nonzero, and it says the state and why.
+        unread = dict(read, modelRead=False, readAt=None, deliveryState='recorded-awaiting-read', waitSatisfied=False,
+                      timedOut=True, guidance='Recorded, not yet read: the recipient is in the middle of a step.')
+        result, _ = self.exchange(json.dumps(unread).encode() + b'\n', ['receipt', rid, '--wait', '5', '--until', 'read'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('did not reach read', result.stderr)
+        self.assertIn('recorded-awaiting-read', result.stderr)
+        self.assertIn('middle of a step', result.stderr)
+
     def test_bounded_invalid_replies(self):
         for reply, error in [(b'', 'disconnected'), (b'{"ok":true}', 'truncated'),
                              (b'x' * (1024 * 1024 + 1), 'oversized'),

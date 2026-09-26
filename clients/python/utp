@@ -103,7 +103,10 @@ TRANSPORT_TIMEOUT = 10
 READ_ONLY_COMMANDS = {"list", "inspect", "diagnose", "profiles.list", "profiles.catalog", "message.receipt"}
 
 
-def call(request: dict) -> dict:
+def call(request: dict, timeout: float | None = None) -> dict:
+    """One request/reply. `timeout` extends the transport deadline for a
+    bounded server-side wait (receipt waits); the default stays short."""
+    transport_timeout = timeout if timeout is not None else TRANSPORT_TIMEOUT
     sent = False
     readonly = request.get("cmd") in READ_ONLY_COMMANDS or (
         request.get("cmd") in {"open", "close", "profile.switch"} and not request.get("confirm")
@@ -120,8 +123,8 @@ def call(request: dict) -> dict:
         fail("request exceeds 65536-byte limit")
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            deadline = time.monotonic() + TRANSPORT_TIMEOUT
-            sock.settimeout(TRANSPORT_TIMEOUT)
+            deadline = time.monotonic() + transport_timeout
+            sock.settimeout(transport_timeout)
             sock.connect(SOCKET_PATH)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -583,8 +586,12 @@ def main() -> None:
     message.add_argument("text")
     message.add_argument("--notice-only", action="store_true", help="ephemeral workspace banner only")
     message.add_argument("--receipt-id", help="stable UUID for receipt lookup and server-supported deduplication; generated before transmission if absent")
-    receipt = sub.add_parser("receipt", help="read durable message receipt (never model-read proof)")
+    receipt = sub.add_parser("receipt", help="read a message receipt: recorded, read by the recipient model, acknowledged")
     receipt.add_argument("receipt_id")
+    receipt.add_argument("--wait", type=int, choices=range(1, 121), metavar="SECONDS",
+                         help="wait natively up to 120 seconds for the --until state")
+    receipt.add_argument("--until", choices=["recorded", "read", "acknowledged"], default="recorded",
+                         help="state to wait for: recorded (default), read (the recipient model had it in context), acknowledged (it responded)")
     message.add_argument("--expected-id", help="target session ID from list")
 
     register_manager = sub.add_parser(
@@ -973,9 +980,15 @@ def main() -> None:
         return
 
     if args.cmd == "receipt":
-        response = call({"cmd": "message.receipt", "receiptId": args.receipt_id})
+        request = {"cmd": "message.receipt", "receiptId": args.receipt_id}
+        if args.wait is not None:
+            request["waitMs"] = args.wait * 1000
+            if args.until != "recorded":
+                request["waitUntil"] = args.until
+        response = call(request, timeout=args.wait + 3) if args.wait is not None else call(request)
         print_error(response)
         print(json.dumps(response))
+        require_state_if_waited(response, args.wait, args.until)
         return
 
     if args.cmd == "task-done":
@@ -1012,6 +1025,22 @@ def main() -> None:
         print("Workspace notice accepted only; not delivered to agent (no acknowledgment)")
     else:
         print(json.dumps(response))
+
+
+UNTIL_FIELD = {"recorded": "recorded", "read": "modelRead", "acknowledged": "agentAcknowledged"}
+
+
+def require_state_if_waited(response: dict, wait_seconds, until: str = "recorded") -> None:
+    """A bounded wait that did not reach its state exits nonzero and says why."""
+    if wait_seconds is None:
+        return
+    if response.get("waitSupported") is not True:
+        sys.exit("utp: this server does not support bounded receipt waits; update UltraTerm. No message was resent.")
+    if until != "recorded" and response.get("waitUntil") != until:
+        sys.exit(f"utp: this server cannot wait for {until}; update UltraTerm. No message was resent.")
+    if response.get("waitSatisfied") is not True or response.get(UNTIL_FIELD[until]) is not True:
+        state = response.get("deliveryState", "unknown")
+        sys.exit(f"utp: receipt did not reach {until} within the wait (now {state}). {response.get('guidance', '')} No message was resent.")
 
 
 if __name__ == "__main__":
