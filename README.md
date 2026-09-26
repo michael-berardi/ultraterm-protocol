@@ -71,7 +71,7 @@ utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The current release is 2.2.1 (`utp --version`); the wire protocol is v2. See
+The current release is 2.3.0 (`utp --version`); the wire protocol is v2. See
 the [changelog](CHANGELOG.md).
 
 ## Protocol v2
