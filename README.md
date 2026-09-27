@@ -58,14 +58,11 @@ ln -s "$PWD/ultraterm-protocol/clients/python/utp" ~/.local/bin/utp-source
 utp-source --version
 ```
 
-Standalone `inspect` calls need `--no-uc` unless the bundled `uc` executable is
-also available.
-
 ## Quick look
 
 ```sh
 utp list                                   # terminals, profiles and session IDs
-utp inspect --slot 2 --no-uc               # bounded recent output from slot 2
+utp inspect --slot 2                       # bounded plain terminal text from slot 2
 utp message --to 2 --expected-id SESSION_ID "Rebase onto main when you finish."
 utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
@@ -86,8 +83,7 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 |---|---|
 | `utp diagnose` | Read-only JSON diagnostics: release/wire versions, connection counts and bounded aggregate health counters; no terminal contents or private paths. |
 | `utp list` | Read-only attached slot/session inventory. |
-| `utp inspect --slot N` | Read-only bounded PTY history; model-readable UltraCompact output by default, or plain text with `--no-uc`. |
-| `utp savings [--rate DOLLARS_PER_MILLION]` | Read local UltraCompact telemetry and summarize saved tokens for the day, 7 days, 30 days, and all time. |
+| `utp inspect --slot N` | Read-only bounded PTY history as plain terminal text; `--no-uc` is a deprecated no-op. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
 | `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. |
 | `utp receipt RECEIPT_ID [--wait SECONDS] [--until recorded\|read\|acknowledged]` | Read a receipt: recorded in the recipient conversation, read by the recipient model (`modelRead`, `readAt`), acknowledged by its response. `--wait` blocks up to 120 s for the `--until` state and exits nonzero on timeout, stating the current state and why. |
@@ -108,14 +104,13 @@ utp profiles create --adapter omp quality provider/model high \
   --routing upstream/primary,upstream/fallback
 ```
 
-## Model-readable inspection and savings
+## Plain-text inspection
 
-The server always returns bounded PTY history. The reference client passes that
-history through UltraCompact by default so agents receive a compact readable
-packet; `utp inspect --no-uc` prints the server text unchanged. `utp savings`
-reads the bundled UltraCompact telemetry locally and can add an estimated value
-with `--rate`. Neither command sends terminal output or telemetry over a
-network.
+The server returns bounded PTY history. The reference client prints that text
+without encoding it or invoking an external codec. The legacy `--no-uc` flag
+is accepted as a deprecated no-op and prints the same text. The former
+`utp savings` helper no longer reads telemetry: legacy calls (including
+`--rate`) exit nonzero with `UltraCompact savings were removed`.
 
 ## Identity-bound slot lifecycle
 
@@ -235,8 +230,8 @@ Run `utp diagnose` to check the control socket without inspecting terminal outpu
 An older server may reject this additive command; that does not change v2 compatibility.
 The CLI bounds a reply to 1 MiB and the exchange to a 10-second deadline. It reports
 missing/refused sockets, timeout, disconnect, truncated lines, invalid JSON, and invalid
-reply envelopes without Python tracebacks. A missing/nonexecutable optional UC codec
-is a clean error; use `inspect --no-uc` for plain text (no silent compression fallback).
+reply envelopes without Python tracebacks. `inspect` prints plain text without
+requiring any external codec.
 
 The client never automatically retries a request. Before any request bytes are sent,
 a connection failure means no request was sent. Once sending starts, a failed mutation

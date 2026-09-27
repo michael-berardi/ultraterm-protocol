@@ -8,7 +8,7 @@ Speaks JSON Lines to ~/.ultraterm/utp.sock.
 Usage:
   utp list                              # read-only attached-terminal inventory
   utp inspect --slot 2 [--lines 80] [--raw] [--no-uc]
-                                        # read-only PTY history; model-readable UC (c=j/r)
+                                        # read-only PTY history; --no-uc is a deprecated no-op
   utp send --slot 2 "ls -la"            # target PTY input + Enter
   utp message --from 1 --to 2 "tests are green"
                                         # native durable inbox; unsupported hosts fail, no PTY input
@@ -168,13 +168,6 @@ def call(request: dict, timeout: float | None = None) -> dict:
     if response["ok"] and request.get("cmd") == "inspect" and not isinstance(response.get("text"), str):
         fail("malformed inspect reply: expected text string")
     return response
-
-
-def run_uc(command: list[str], **kwargs) -> subprocess.CompletedProcess:
-    try:
-        return subprocess.run(command, **kwargs)
-    except (OSError, subprocess.SubprocessError):
-        raise SystemExit("utp: optional UC codec unavailable or timed out; for plain inspection use --no-uc") from None
 
 
 def profile_create_request(args: argparse.Namespace) -> dict:
@@ -520,13 +513,11 @@ def main() -> None:
     inspect.add_argument("--lines", type=int, default=80)
     inspect.add_argument("--raw", action="store_true")
 
-    savings = sub.add_parser(
-        "savings", help="tokens saved by UltraTerm (day / 7d / 30d / all-time)"
-    )
-    savings.add_argument("--rate", type=float,
-                         help="optional dollars per 1M tokens for the estimate")
+    # Keep legacy invocations explicit rather than silently pretending to report savings.
+    savings = sub.add_parser("savings", help="deprecated; UltraCompact savings were removed")
+    savings.add_argument("--rate", type=float, help="deprecated; ignored")
     inspect.add_argument("--no-uc", action="store_true",
-                         help="emit plain terminal text instead of an UltraCompact packet")
+                         help="deprecated no-op; inspect always emits plain terminal text")
 
     send = sub.add_parser("send", help="send input to a terminal's PTY")
     send.add_argument("--slot", type=int)
@@ -696,19 +687,7 @@ def main() -> None:
         return
 
     if args.cmd == "savings":
-        uc_bin = os.environ.get("UC_BIN") or os.path.expanduser(
-            "~/.ultraterm/bin/uc"
-        )
-        command = [uc_bin, "telemetry"]
-        if args.rate is not None:
-            command.extend(["--rate", str(args.rate)])
-        proc = run_uc(
-            command, capture_output=True, text=True, timeout=30,
-        )
-        if proc.returncode != 0:
-            sys.exit(f"utp: UC telemetry failed: {proc.stderr.strip()}")
-        sys.stdout.write(proc.stdout)
-        return
+        sys.exit("utp: UltraCompact savings were removed")
 
     if args.cmd == "inspect":
         request = {"cmd": "inspect", "lines": args.lines, "raw": args.raw}
@@ -721,30 +700,6 @@ def main() -> None:
             sys.exit("utp inspect: --slot or --id required")
         response = call(request)
         print_error(response)
-        if not getattr(args, "no_uc", False):
-            uc_bin = os.environ.get("UC_BIN") or os.path.expanduser(
-                "~/.ultraterm/bin/uc"
-            )
-            payload = json.dumps(
-                {"slot": response.get("slot"), "text": response["text"]},
-                separators=(",", ":"),
-            )
-            uc_env = {**os.environ, "UC_TELEMETRY_SOURCE": "utp"}
-            if "UC_TELEMETRY" not in uc_env and "UC_TELEMETRY_PATH" not in uc_env:
-                default_sink = os.path.expanduser(
-                    "~/.local/state/ultracompact/telemetry.jsonl"
-                )
-                if os.path.isfile(default_sink):
-                    uc_env["UC_TELEMETRY_PATH"] = default_sink
-            proc = run_uc([uc_bin, "encode", "--readable", "--stats"], input=payload,
-                                  capture_output=True, text=True, timeout=30,
-                                  env=uc_env)
-            if proc.returncode != 0:
-                sys.exit(f"utp: UC encoding failed: {proc.stderr.strip()}")
-            if proc.stderr.strip():
-                print(proc.stderr.strip(), file=sys.stderr)
-            print(proc.stdout, end="")
-            return
         print(response["text"])
         return
 

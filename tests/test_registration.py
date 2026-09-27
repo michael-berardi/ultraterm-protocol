@@ -91,7 +91,6 @@ class RegistrationTestCase(unittest.TestCase):
             **inherited,
             "HOME": str(self.home),
             "TMUX_PANE": "",
-            "UC_BIN": str(self.home / "uc"),
             **(env or {}),
         }
         result = subprocess.run(
