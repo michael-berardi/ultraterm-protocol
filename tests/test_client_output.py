@@ -17,25 +17,7 @@ class ClientOutputTests(unittest.TestCase):
         self.socket_dir = self.root / ".ultraterm"
         self.socket_dir.mkdir()
         self.socket_path = self.socket_dir / "utp.sock"
-        self.uc_args = self.root / "uc-args"
-        self.uc = self.root / "uc"
-        self.uc.write_text(
-            "#!/bin/sh\n"
-            "printf '%s\\n' \"$@\" > \"$UC_ARGS_CAPTURE\"\n"
-            "if [ \"$1\" = encode ]; then\n"
-            "  cat >/dev/null\n"
-            "  printf '{\"slot\":2,\"text\":\"readable\"}\\n'\n"
-            "else\n"
-            "  printf 'saved locally\\n'\n"
-            "fi\n"
-        )
-        self.uc.chmod(0o700)
-        self.env = {
-            **os.environ,
-            "HOME": str(self.root),
-            "UC_BIN": str(self.uc),
-            "UC_ARGS_CAPTURE": str(self.uc_args),
-        }
+        self.env = {**os.environ, "HOME": str(self.root)}
 
     def tearDown(self):
         self.temp.cleanup()
@@ -58,8 +40,8 @@ class ClientOutputTests(unittest.TestCase):
         self.assertTrue(ready.wait(timeout=2))
         return thread
 
-    def test_inspect_emits_model_readable_output_by_default(self):
-        server = self.serve_once('{"ok":true,"slot":2,"text":"terminal text"}\n')
+    def test_inspect_emits_plain_history_by_default(self):
+        server = self.serve_once('{"ok":true,"slot":2,"text":"terminal text\\nsecond line"}\n')
         result = subprocess.run(
             [str(CLIENT), "inspect", "--slot", "2", "--lines", "1"],
             env=self.env,
@@ -70,13 +52,10 @@ class ClientOutputTests(unittest.TestCase):
         server.join(timeout=2)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, '{"slot":2,"text":"readable"}\n')
-        self.assertEqual(
-            self.uc_args.read_text().splitlines(),
-            ["encode", "--readable", "--stats"],
-        )
+        self.assertEqual(result.stdout, "terminal text\nsecond line\n")
+        self.assertEqual(result.stderr, "")
 
-    def test_inspect_no_uc_preserves_plain_history(self):
+    def test_inspect_no_uc_is_deprecated_no_op(self):
         server = self.serve_once('{"ok":true,"slot":2,"text":"terminal text"}\n')
         result = subprocess.run(
             [str(CLIENT), "inspect", "--slot", "2", "--no-uc"],
@@ -89,35 +68,22 @@ class ClientOutputTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "terminal text\n")
-        self.assertFalse(self.uc_args.exists())
+        self.assertEqual(result.stderr, "")
 
-    def test_savings_reads_local_uc_telemetry(self):
-        result = subprocess.run(
-            [str(CLIENT), "savings", "--rate", "12.5"],
-            env=self.env,
-            text=True,
-            capture_output=True,
-            timeout=5,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "saved locally\n")
-        self.assertEqual(self.uc_args.read_text().splitlines(), ["telemetry", "--rate", "12.5"])
-
-    def test_savings_reports_uc_telemetry_failure(self):
-        self.uc.write_text("#!/bin/sh\necho 'telemetry store unreadable' >&2\nexit 3\n")
-
-        result = subprocess.run(
-            [str(CLIENT), "savings"],
-            env=self.env,
-            text=True,
-            capture_output=True,
-            timeout=5,
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("UC telemetry failed: telemetry store unreadable", result.stderr)
+    def test_savings_legacy_calls_fail_clearly_without_socket(self):
+        for args in ([], ["--rate", "12.5"]):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [str(CLIENT), "savings", *args],
+                    env=self.env,
+                    text=True,
+                    capture_output=True,
+                    timeout=5,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("UltraCompact savings were removed", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

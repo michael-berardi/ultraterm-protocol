@@ -13,7 +13,7 @@ CLIENT = Path(__file__).resolve().parents[1] / 'clients/python/utp'
 
 
 class TransportTests(unittest.TestCase):
-    def exchange(self, reply, args=None, delay=0, codec=None):
+    def exchange(self, reply, args=None, delay=0):
         with tempfile.TemporaryDirectory() as home:
             path = Path(home) / '.ultraterm'
             path.mkdir()
@@ -49,9 +49,7 @@ class TransportTests(unittest.TestCase):
 
                 thread = threading.Thread(target=serve)
                 thread.start()
-                env = {**os.environ, 'HOME': home, 'TMUX_PANE': '', 'UC_BIN': str(Path(home) / 'uc')}
-                if codec == 'nonexecutable':
-                    Path(env['UC_BIN']).write_text('#!/bin/sh\nexit 0\n')
+                env = {**os.environ, 'HOME': home, 'TMUX_PANE': ''}
                 result = subprocess.run([str(CLIENT), *(args or ['diagnose'])], env=env,
                                         capture_output=True, text=True, timeout=14)
                 thread.join(3)
@@ -127,7 +125,7 @@ class TransportTests(unittest.TestCase):
                 self.assertIn('refused' if stale else 'not found', result.stderr)
                 self.assertNotIn('Traceback', result.stderr)
 
-    def test_inspect_shape_checked_before_codec(self):
+    def test_inspect_shape_checked_before_output(self):
         for text in [None, 42, {}, []]:
             result, _ = self.exchange(json.dumps({'ok': True, 'text': text}).encode() + b'\n',
                                       ['inspect', '--slot', '2'])
@@ -137,7 +135,7 @@ class TransportTests(unittest.TestCase):
 
     def test_explicit_id_is_never_dropped_for_slot(self):
         for args, reply in [(['send', '--slot', '2', '--id', 'SESSION-A', 'hello'], b'{"ok":true}\n'),
-                            (['inspect', '--slot', '2', '--id', 'SESSION-A', '--no-uc'],
+                            (['inspect', '--slot', '2', '--id', 'SESSION-A'],
                              b'{"ok":true,"text":"hello"}\n')]:
             with self.subTest(cmd=args[0]):
                 result, request = self.exchange(reply, args)
@@ -156,8 +154,8 @@ class TransportTests(unittest.TestCase):
         self.assertIn('committed', result.stderr)
         self.assertIn('do not retry', result.stderr)
 
-    def test_missing_and_nonexecutable_codec_fail_cleanly(self):
-        for codec in [None, 'nonexecutable']:
-            result, _ = self.exchange(b'{"ok":true,"text":"hello"}\n', ['inspect', '--slot', '2'], codec=codec)
-            self.assertIn('optional UC codec unavailable', result.stderr)
-            self.assertIn('--no-uc', result.stderr)
+    def test_inspect_returns_plain_text_without_external_codec(self):
+        result, request = self.exchange(b'{"ok":true,"text":"hello"}\n', ['inspect', '--slot', '2'])
+        self.assertEqual(request, {'cmd': 'inspect', 'lines': 80, 'raw': False, 'slot': 2})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'hello\n')
