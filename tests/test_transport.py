@@ -66,7 +66,83 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), response)
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
-        self.assertEqual(result.stdout.strip(), '2.4.0')
+        self.assertEqual(result.stdout.strip(), '2.5.0')
+
+    def test_refit_requests_one_terminal_or_all(self):
+        sid = '77777777-7777-4777-8777-777777777777'
+        delivery = 'signalled; the window refits on its next frame, applied unconfirmed'
+        one = dict(ok=True, refit=dict(all=False, terminals=[dict(slot=3, id=sid)]), delivery=delivery)
+        result, request = self.exchange(json.dumps(one).encode() + b'\n', ['refit', '--slot', '3'])
+        self.assertEqual(request, {'cmd': 'refit', 'slot': 3})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'refit requested\tslot 3\t{sid}', result.stdout)
+        # No slot: the request names none, so the server refits every attached terminal.
+        everything = dict(ok=True, refit=dict(all=True, terminals=[dict(slot=1, id=sid), dict(slot=3, id=sid)]),
+                          delivery=delivery)
+        result, request = self.exchange(json.dumps(everything).encode() + b'\n', ['refit'])
+        self.assertEqual(request, {'cmd': 'refit'})
+        self.assertEqual(result.stdout.count('refit requested'), 2)
+        # Nothing attached is a successful no-op, not an error.
+        empty = dict(ok=True, refit=dict(all=True, terminals=[]), delivery=delivery)
+        result, _ = self.exchange(json.dumps(empty).encode() + b'\n', ['refit'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('no terminals are attached', result.stdout)
+
+    def test_refit_refusals_are_reported(self):
+        for error in ['no session on slot 2', 'slot must be between 1 and 32']:
+            result, request = self.exchange(json.dumps(dict(ok=False, error=error)).encode() + b'\n',
+                                            ['refit', '--slot', '2'])
+            self.assertEqual(request, {'cmd': 'refit', 'slot': 2})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(error, result.stderr)
+            self.assertNotIn('refit requested', result.stdout)
+
+    def test_refused_send_names_its_receipt_only_when_the_server_knows_it(self):
+        rid = '66666666-6666-4666-8666-666666666666'
+        args = ['message', '--from', '1', '--to', '2', '--receipt-id', rid, 'hello']
+        worker = ('WorkerSenderUnsupportedError: background worker ID cannot send native inbox messages. '
+                  'Nothing was queued.')
+        # Refused before anything was queued: no receipt exists, so the id is not offered.
+        unknown = dict(ok=False, error=worker, receiptId=rid, receiptKnown=False)
+        result, request = self.exchange(json.dumps(unknown).encode() + b'\n', args)
+        self.assertEqual(request['receiptId'], rid)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('WorkerSenderUnsupportedError', result.stderr)
+        self.assertIn(f'no receipt {rid} exists', result.stderr)
+        self.assertNotIn(f'receiptId={rid}', result.stderr)
+        # Refused after durable state changed: the id is a real receipt and is named.
+        known = dict(ok=False, error='sync uncertain', receiptId=rid, receiptKnown=True)
+        result, _ = self.exchange(json.dumps(known).encode() + b'\n', args)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f'receiptId={rid} (refused, but the server holds this receipt', result.stderr)
+        # An older server sends no receiptKnown: no id is offered unless its error says to retry the same one.
+        older = dict(ok=False, error='native host unsupported')
+        result, _ = self.exchange(json.dumps(older).encode() + b'\n', args)
+        self.assertNotIn('receiptId=', result.stderr)
+        self.assertNotIn('no receipt', result.stderr)
+        # An accepted send names its receipt.
+        accepted = dict(ok=True, id='RECIPIENT', receiptId=rid, delivery='durably-queued')
+        result, _ = self.exchange(json.dumps(accepted).encode() + b'\n', args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'receiptId={rid} (query receipt', result.stderr)
+
+    def test_task_done_refusal_follows_the_same_receipt_rule(self):
+        rid = '66666666-6666-4666-8666-666666666667'
+        args = ['task-done', '--from-id', 'WORKER', '--summary', 'Done.', '--receipt-id', rid]
+        refused = dict(ok=False, error='terminal 1 has no live agent host. Nothing was queued',
+                       receiptId=rid, receiptKnown=False)
+        result, request = self.exchange(json.dumps(refused).encode() + b'\n', args)
+        self.assertEqual(request['cmd'], 'task.done')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('has no live agent host', result.stderr)
+        self.assertIn(f'no receipt {rid} exists', result.stderr)
+
+    def test_unknown_transport_outcome_still_names_the_receipt(self):
+        rid = '66666666-6666-4666-8666-666666666668'
+        result, _ = self.exchange(b'', ['message', '--from', '1', '--to', '2', '--receipt-id', rid, 'hello'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f'receiptId={rid} (outcome unknown', result.stderr)
+        self.assertIn('mutation outcome unknown', result.stderr)
 
     def test_receipt_waits_for_the_recipient_model_to_read(self):
         rid = '55555555-5555-4555-8555-555555555555'
