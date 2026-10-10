@@ -19,7 +19,7 @@
   <a href="#security">Security</a>
 </p>
 
-UTP is the local control interface of [UltraTerm](https://implosecybernetics.com/software/),
+UTP is the local control interface of [UltraTerm](https://paretocybernetics.com/software/),
 a terminal workspace for running coding agents side by side. It lets an agent
 list the terminals on your machine, read a bounded slice of their output, send
 input, open or close terminals, hand work to a fresh worker, and report back to
