@@ -68,7 +68,7 @@ utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The current release is 2.4.0 (`utp --version`); the wire protocol is v2. See
+The current release is 2.5.0 (`utp --version`); the wire protocol is v2. See
 the [changelog](CHANGELOG.md).
 
 ## Protocol v2
@@ -85,13 +85,14 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | `utp list` | Read-only attached slot/session inventory. |
 | `utp inspect --slot N` | Read-only bounded PTY history as plain terminal text; `--no-uc` is a deprecated no-op. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
-| `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. |
+| `utp refit [--slot N]` | Ask the UltraTerm window to re-measure and redraw one terminal, or every attached terminal when `--slot` is omitted; repairs a blank or mis-sized pane. Output only: nothing is written to the session. |
+| `utp message --to N TEXT` | Durable inbox submission with receipt; `--notice-only` selects an ephemeral banner. A refused send prints a receipt ID only when the server holds that receipt. |
 | `utp receipt RECEIPT_ID [--wait SECONDS] [--until recorded\|read\|acknowledged]` | Read a receipt: recorded in the recipient conversation, read by the recipient model (`modelRead`, `readAt`), acknowledged by its response. `--wait` blocks up to 120 s for the `--until` state and exits nonzero on timeout, stating the current state and why. |
 | `utp open --profile P` | Dry-run the lowest-free-slot assignment; confirmation attaches its pane. |
 | `utp close --slot N` | Dry-run an exact slot removal; confirmation requires the printed session ID. |
 | `utp switch-profile P --slot N` | Dry-run an identity-bound in-place profile handoff. |
 | `utp register-manager --slot M --from-id WID --expected-id MID` | Register the exact worker and manager sessions (`WID` from `list`, `MID` from `list`); many workers may share one manager. |
-| `utp task-done --from-id WID --summary TEXT` | Queue a completion to the registered manager conversation; `--to M` additionally requires `--expected-id MID`. Query its receipt for delivery state. |
+| `utp task-done --from-id WID --summary TEXT` | Queue a completion to the registered manager conversation; `--to M` additionally requires `--expected-id MID`. Query its receipt for delivery state; a refused completion prints a receipt ID only when the server holds that receipt. |
 | `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
 | `utp profiles ...` | List harness-scoped profiles; create/remove require `--adapter omp`. |
 | `utp report ...` | One authorized friendly text report, file, or image through a private local route hook. |
@@ -150,6 +151,27 @@ are never typed into a PTY, and they are rejected once either pinned conversatio
 has changed, until the new assignment is registered explicitly. The local route
 store at `~/.ultraterm/manager-map.json` is format version 3 while the wire
 version stays 2, and legacy slot-only records are not migrated into it.
+
+## Refit
+
+`refit` repairs a terminal pane that is blank or still at a default size without a click or a window resize. It signals the workspace window, which re-measures the terminal, tells the PTY its real size and has tmux redraw; nothing is written to the session.
+
+```sh
+utp refit             # every attached terminal, in slot order
+utp refit --slot 3    # exactly slot 3
+```
+
+A slot outside 1–32 or with no attached session is an error, and a named slot is never widened to every terminal. The reply is a signal, not a confirmation: the window applies it on its next frame, so look at the pane or run `utp list` to confirm. The wire form is `{"cmd":"refit","slot":3}`; see [spec 3.11](protocols/v2.md).
+
+## Messaging hosts, refusals and senders
+
+A native `message` or `task-done` needs a live agent host on both terminals. A busy Claude Code terminal can receive: the server looks for the host on the active pane, then on every pane of the terminal (up to 8), and when no pane publishes one it falls back to the terminal's own verified inbox registration. A terminal with no live host is refused with `has no live agent host` and nothing is queued.
+
+A refused send replies with `receiptId` and `receiptKnown`. `receiptKnown:true` means the server holds that receipt (for example a refusal after an uncertain sync) and `utp receipt` can read it; `false` means nothing was queued and no receipt exists. The reference client prints `receiptId=` on stderr only after an accepted send, after a refusal with `receiptKnown:true`, and after a transport failure that may have reached the app; for `receiptKnown:false` it says that nothing was queued and no receipt exists.
+
+A background worker has no terminal slot, so it cannot send a native inbox message: the server refuses it with `WorkerSenderUnsupportedError`, before any host lookup, and queues nothing. A `--notice-only` banner from a worker is not refused.
+
+For background agents, the wire command `agent.send` delivers text of exactly one non-control character as a literal keypress (so a numbered or yes/no picker receives `1` or `y`) and anything longer as a bracketed paste; see [spec 3.12](protocols/v2.md).
 
 ## Universal handoff
 

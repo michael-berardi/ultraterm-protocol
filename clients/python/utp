@@ -10,6 +10,7 @@ Usage:
   utp inspect --slot 2 [--lines 80] [--raw] [--no-uc]
                                         # read-only PTY history; --no-uc is a deprecated no-op
   utp send --slot 2 "ls -la"            # target PTY input + Enter
+  utp refit [--slot N]                  # refit and redraw one terminal, or all; output only
   utp message --from 1 --to 2 "tests are green"
                                         # native durable inbox; unsupported hosts fail, no PTY input
   utp open --harness HARNESS --profile NAME [--title s] [--confirm]
@@ -100,6 +101,14 @@ def normalize_report_items(values: list[str], name: str) -> list[str]:
 
 MAX_REPLY_BYTES = 1024 * 1024
 TRANSPORT_TIMEOUT = 10
+
+
+class TransportFailure(SystemExit):
+    """A control-socket failure. `sent` is whether the request may have reached the app."""
+
+    def __init__(self, message: str, sent: bool):
+        super().__init__(message)
+        self.sent = sent
 READ_ONLY_COMMANDS = {"list", "inspect", "diagnose", "profiles.list", "profiles.catalog", "message.receipt"}
 
 
@@ -116,7 +125,7 @@ def call(request: dict, timeout: float | None = None) -> dict:
         outcome = ("; mutation outcome unknown; do not retry automatically; reconcile with read-only queries"
                    if sent and not readonly else
                    "; no request sent" if not sent else "; read-only request failed")
-        raise SystemExit("utp: " + reason + outcome)
+        raise TransportFailure("utp: " + reason + outcome, sent)
 
     payload = json.dumps(request).encode() + b"\n"
     if len(payload) > 65536:
@@ -219,6 +228,35 @@ def new_receipt_id() -> str:
     import uuid  # deferred: only receipt-bearing messages need it
 
     return str(uuid.uuid4())
+
+
+def call_with_receipt(request: dict) -> dict:
+    """Send a request that carries a `receiptId`, naming that id only when the server can be asked about it.
+
+    A send the server refuses before queueing creates no receipt, so the id is printed after an accepted
+    send, after a refusal that still left a receipt (`receiptKnown:true`) and after a transport failure that
+    may have reached the app. A refusal that left none says so (spec 3.4).
+    """
+    receipt_id = request["receiptId"]
+    try:
+        response = call(request)
+    except TransportFailure as failure:
+        if failure.sent:
+            print(f"receiptId={receipt_id} (outcome unknown: the server may or may not have recorded it; query receipt "
+                  "before considering retry and reuse this id; 'unknown receipt' means it never did)",
+                  file=sys.stderr, flush=True)
+        raise
+    if response.get("ok"):
+        print(f"receiptId={receipt_id} (query receipt before considering retry)", file=sys.stderr, flush=True)
+        return response
+    error = str(response.get("error", "request failed"))
+    known = response.get("receiptKnown")
+    if known is True or (known is None and "retry same receipt ID" in error):
+        print(f"receiptId={receipt_id} (refused, but the server holds this receipt; query it before considering retry)",
+              file=sys.stderr, flush=True)
+    elif known is False:
+        error += f" [refused: nothing was queued and no receipt {receipt_id} exists]"
+    sys.exit(f"utp: {error}")
 
 
 def print_error(response: dict) -> None:
@@ -502,7 +540,7 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="2.4.0")
+    parser.add_argument("--version", action="version", version="2.5.0")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")
@@ -518,6 +556,12 @@ def main() -> None:
     savings.add_argument("--rate", type=float, help="deprecated; ignored")
     inspect.add_argument("--no-uc", action="store_true",
                          help="deprecated no-op; inspect always emits plain terminal text")
+
+    refit = sub.add_parser(
+        "refit",
+        help="refit and redraw one terminal, or all, in the UltraTerm window (repairs a blank or mis-sized pane; output only)",
+    )
+    refit.add_argument("--slot", type=int, help="terminal slot (default: every terminal)")
 
     send = sub.add_parser("send", help="send input to a terminal's PTY")
     send.add_argument("--slot", type=int)
@@ -701,6 +745,21 @@ def main() -> None:
         response = call(request)
         print_error(response)
         print(response["text"])
+        return
+
+    if args.cmd == "refit":
+        request = {"cmd": "refit"}
+        if args.slot is not None:
+            request["slot"] = args.slot
+        response = call(request)
+        print_error(response)
+        terminals = (response.get("refit") or {}).get("terminals") or []
+        if not terminals:
+            print("utp refit: no terminals are attached; nothing to refit")
+            return
+        for terminal in terminals:
+            print(f"refit requested\tslot {terminal['slot']}\t{terminal['id']}")
+        print("The window applies it on its next frame; use `utp list` or look at the pane to confirm")
         return
 
     if args.cmd == "send":
@@ -961,9 +1020,7 @@ def main() -> None:
         if args.expected_id:
             request["expectedId"] = args.expected_id
         request["receiptId"] = args.receipt_id or new_receipt_id()
-        print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
-        response = call(request)
-        print_error(response)
+        response = call_with_receipt(request)
         print(json.dumps(response))
         return
 
@@ -971,11 +1028,12 @@ def main() -> None:
     if args.expected_id:
         request["expectedId"] = args.expected_id
     request["noticeOnly"] = args.notice_only
-    if not args.notice_only:
+    if args.notice_only:
+        response = call(request)
+        print_error(response)
+    else:
         request["receiptId"] = args.receipt_id or new_receipt_id()
-        print(f"receiptId={request['receiptId']} (query receipt before considering retry)", file=sys.stderr, flush=True)
-    response = call(request)
-    print_error(response)
+        response = call_with_receipt(request)
     if args.notice_only:
         print("Workspace notice accepted only; not delivered to agent (no acknowledgment)")
     else:

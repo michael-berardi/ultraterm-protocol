@@ -2,6 +2,22 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.5.0] - 2026-10-10
+
+Documents the protocol changes shipped in UltraTerm 3.2.4. The wire version stays 2; the new fields are additive. A server that predates 3.2.4 rejects `refit` as an unknown command and omits `receiptKnown`, which the client reports plainly.
+
+### Added
+
+- `refit` command: `{"cmd":"refit","slot":N}` asks the workspace window to re-measure, resize and redraw one terminal, or every attached terminal when `slot` is omitted. It repairs a blank or mis-sized pane and writes nothing to the session. A `slot` outside 1–32 is refused with `slot must be between 1 and 32`, an unattached slot with `no session on slot N` (a named slot is never widened to all terminals), and `id` with `refit takes slot, not id`. The reply is `{"ok":true,"refit":{"all":bool,"terminals":[{"slot":N,"id":"SESSION_UUID"}]},"delivery":"signalled; ..."}`: it signals the window, which applies the refit on its next frame, unconfirmed. Spec 3.11.
+- `utp refit [--slot N]` prints one `refit requested` line per terminal, or says that no terminals are attached.
+- `agent.send` is documented (spec 3.12): text of exactly one non-control character is delivered to a background agent as a literal keypress, so numbered and yes/no pickers that ignore pasted input receive `1` or `y`; longer text, and a single control character, is delivered as a bracketed paste.
+
+### Changed
+
+- A busy Claude Code terminal can receive `message` and `task.done`. The server finds the agent host on the active pane and then on every live pane of the terminal (at most 8; two different hosts are refused), and when no pane publishes one it falls back to the terminal's verified inbox registration. Otherwise the send fails with `has no live agent host` and nothing is queued. Spec 3.4.
+- A refused native `message` or `task.done` replies with `receiptId` and `receiptKnown`. `receiptKnown:true` means the server holds that receipt; `false` means nothing was queued and no receipt exists. `utp message` and `utp task-done` now print `receiptId=` on stderr only after an accepted send, after a refusal with `receiptKnown:true`, and after a transport failure that may have reached the server; a refusal with `receiptKnown:false` says that nothing was queued and no receipt exists. Previously the id was printed before the request was sent, which sent callers to `utp receipt` for an `unknown receipt` after a refusal.
+- A background worker (no terminal slot, identified by `fromId`) that sends a native `message` is refused with `WorkerSenderUnsupportedError` before any host lookup and nothing is queued; this was previously reported as `sender replaced`. A `noticeOnly` message from a worker is not refused.
+
 ## [2.4.0] - 2026-09-27
 
 ### Removed
