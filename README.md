@@ -68,7 +68,7 @@ utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The current release is 2.5.0 (`utp --version`); the wire protocol is v2. See
+The current release is 2.6.0 (`utp --version`); the wire protocol is v2. See
 the [changelog](CHANGELOG.md).
 
 ## Protocol v2
@@ -95,6 +95,8 @@ The normative contract is [`protocols/v2.md`](protocols/v2.md). [`protocols/v1.m
 | `utp task-done --from-id WID --summary TEXT` | Queue a completion to the registered manager conversation; `--to M` additionally requires `--expected-id MID`. Query its receipt for delivery state; a refused completion prints a receipt ID only when the server holds that receipt. |
 | `utp handoff ...` | Transfer a private context packet to a replacement or new managed worker. |
 | `utp profiles ...` | List harness-scoped profiles; create/remove require `--adapter omp`. |
+| `utp profiles hidden` / `utp profiles hide\|show HARNESS/PROFILE [--confirm]` | List hidden profiles, or hide or show one in every picker; a dry run unless `--confirm`. A hidden profile cannot be launched by name. |
+| `utp dials list` / `utp dials enable\|disable ID [--confirm]` | List usage dials, or enable or disable one without touching its other settings; a dry run unless `--confirm`. |
 | `utp report ...` | One authorized friendly text report, file, or image through a private local route hook. |
 | `utp redact ...` | Delete the bot's own prior messages by explicit ID through the same hook; audit-logged. |
 

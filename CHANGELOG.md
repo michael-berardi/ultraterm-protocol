@@ -2,6 +2,18 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.6.0] - 2026-10-11
+
+Documents the profile visibility and usage dial commands that came with the UltraTerm 3.2 line and are unchanged in 3.2.10. The wire version stays 2; the commands are additive. A server that predates them rejects the command as unknown, and the client reports that plainly. UltraTerm 3.2.5 through 3.2.10 changed no other UTP command.
+
+### Added
+
+- `profiles.visibility` command (spec 3.13): `list`, `hide` and `show` with `harnessId` and `profile`. `hide` and `show` are a dry run unless `confirm:true`; ids are 1–64 lowercase letters, digits, `.`, `_` or `-`, not starting with `-`, `.` or `_`; at most 128 profiles can be hidden. Refusals: `profiles.visibility action must be list, hide or show`, `profiles.visibility hide requires harnessId and profile`, `profiles.visibility harness and harnessId disagree`, `HiddenProfileError: … is not a valid harness/profile id`, `at most 128 profiles can be hidden`, and `Profile visibility controls are disabled in an isolated mirror host`.
+- `open` and `profile.switch` refuse a hidden profile with an error beginning `HiddenProfileError:` (spec 3.13).
+- `provider.dials` command with the `list` and `upsert` actions (spec 3.14): the usage dial catalog and its revision, and a revision-checked save of one dial. Refusals: `expectedRevision is required; list the catalog first`, `Dial revision conflict; reload and retry`, `Invalid provider dial configuration`, `Unknown provider.dials action`, and `Provider dial controls are disabled in an isolated mirror host`.
+- `utp profiles hidden`, `utp profiles hide|show HARNESS/PROFILE [--confirm]`, `utp dials list` and `utp dials enable|disable ID [--confirm]` in the reference client. Changes are a dry run unless `--confirm` is given; a dial toggle sends the whole dial back with only `enabled` changed and reports `DialRevisionConflictError` if the catalog changed in between.
+- `diagnose` may list optional commands in a `capabilities` array (spec 9).
+
 ## [2.5.0] - 2026-10-10
 
 Documents the protocol changes shipped in UltraTerm 3.2.4. The wire version stays 2; the new fields are additive. A server that predates 3.2.4 rejects `refit` as an unknown command and omits `receiptKnown`, which the client reports plainly.
