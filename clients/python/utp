@@ -120,7 +120,7 @@ READ_ONLY_COMMANDS = {"list", "inspect", "diagnose", "profiles.list", "profiles.
 
 def call(request: dict, timeout: float | None = None) -> dict:
     """One request/reply. `timeout` extends the transport deadline for a
-    bounded server-side wait (receipt waits); the default stays short."""
+    bounded server-side wait (receipt waits, provider dial catalog calls); the default stays short."""
     transport_timeout = timeout if timeout is not None else TRANSPORT_TIMEOUT
     sent = False
     readonly = request.get("cmd") in READ_ONLY_COMMANDS or (
@@ -329,6 +329,10 @@ def run_profiles_visibility(args: argparse.Namespace) -> None:
 def read_dial_catalog(command: str) -> tuple[int, list[dict]]:
     response = call({"cmd": "provider.dials", "action": "list"}, timeout=50)
     print_error(response)
+    return parse_dial_catalog(response, command)
+
+
+def parse_dial_catalog(response: dict, command: str) -> tuple[int, list[dict]]:
     catalog = response.get("catalog")
     revision = catalog.get("revision") if isinstance(catalog, dict) else None
     dials = catalog.get("dials") if isinstance(catalog, dict) else None
@@ -389,6 +393,8 @@ def run_dials(args: argparse.Namespace) -> None:
             f"nothing was changed, rerun 'utp dials {args.dials_cmd} {args.id} --confirm'"
         )
     print_error(response)
+    # The reply is the new catalog; a bare ok:true must not be reported as a confirmed change.
+    parse_dial_catalog(response, command)
     print(f"utp {command}: dial {args.id} {args.dials_cmd}d")
 
 
@@ -708,7 +714,7 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="2.6.0")
+    parser.add_argument("--version", action="version", version="2.6.1")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")

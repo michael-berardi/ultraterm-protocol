@@ -2,6 +2,29 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.6.1] - 2026-10-11
+
+Corrects the 2.6.0 documentation against the UltraTerm 3.2.10 server source and fixes the reference client and its tests. The wire version stays 2; no command or field changed.
+
+### Fixed
+
+- Spec 3.13 no longer says `open` and `profile.switch` refuse a hidden profile with `HiddenProfileError:`. For a non-OMP harness, `open` returns the `unknown UltraTerm Profile` error for a hidden profile; OMP profiles and `profile.switch` are not checked against visibility yet (see Known issues). The 2.6.0 entry below repeats the wrong claim; this entry supersedes it.
+- Spec 3.13 no longer says a missing profile falls back to the first visible one; `open` requires `profile`. `hidden` lists only profiles hidden in Settings, not profiles hidden because their provider was removed.
+- Spec 3.13 says the hidden list is sorted by its `harness/profile` text, which is the server's order.
+- Spec 3.14 upsert example is a built-in dial with `builtinProvider` equal to its `id`, and its reply is a non-empty catalog. Built-in dials accept only label, visibility and order edits; an `http` dial needs an endpoint and at least one window. An unknown `id` is appended, up to 34 dials.
+- Spec 3.14 says `Invalid provider dial configuration` is for a wrong shape only; content-rule failures return specific messages.
+- Spec §9 says the client's deadline is 50 seconds for `provider.dials` calls, not 10.
+
+### Changed
+
+- `utp dials enable|disable --confirm` checks the reply to a confirmed save: a reply without a valid catalog is reported as `malformed dial catalog reply` or `malformed dial in catalog reply` and is not printed as success.
+
+### Known issues
+
+- For OMP profiles, `open` does not refuse a hidden profile, and `profile.switch` does not check visibility. For a non-OMP harness, `open` refuses with the `unknown UltraTerm Profile` error, not `HiddenProfileError:`. `hide omp/NAME` is stored but changes nothing. Server fix is open work in UltraTerm, not in this release.
+- `profiles hidden` and `profiles show` do not account for profiles hidden because their provider was removed. Server fix is open work in UltraTerm, not in this release.
+- Some `provider.dials` content-rule messages and the busy refusal (`Dial configuration busy; retry`) are not documented in 3.14.
+
 ## [2.6.0] - 2026-10-11
 
 Documents the profile visibility and usage dial commands that came with the UltraTerm 3.2 line and are unchanged in 3.2.10. The wire version stays 2; the commands are additive. A server that predates them rejects the command as unknown, and the client reports that plainly. UltraTerm 3.2.5 through 3.2.10 changed no other UTP command.
