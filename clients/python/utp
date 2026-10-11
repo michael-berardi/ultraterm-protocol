@@ -34,6 +34,12 @@ Usage:
   utp profiles list
   utp profiles create --adapter omp NAME MODEL THINKING [--title-model MODEL] [--routing UPSTREAM[,UPSTREAM...]]
   utp profiles remove --adapter omp NAME
+  utp profiles hidden                   # read-only: HARNESS/PROFILE of every hidden profile
+  utp profiles hide|show HARNESS/PROFILE [--confirm]
+                                        # hide or show one profile in every picker; dry run by default
+  utp dials list                        # read-only: id, enabled, kind, order and name of every usage dial
+  utp dials enable|disable ID [--confirm]
+                                        # dry run by default
 """
 
 from __future__ import annotations
@@ -118,8 +124,9 @@ def call(request: dict, timeout: float | None = None) -> dict:
     transport_timeout = timeout if timeout is not None else TRANSPORT_TIMEOUT
     sent = False
     readonly = request.get("cmd") in READ_ONLY_COMMANDS or (
-        request.get("cmd") in {"open", "close", "profile.switch"} and not request.get("confirm")
-    )
+        request.get("cmd") in {"open", "close", "profile.switch", "profiles.visibility"}
+        and (request.get("action") == "list" or not request.get("confirm"))
+    ) or (request.get("cmd") == "provider.dials" and request.get("action") == "list")
 
     def fail(reason: str) -> None:
         outcome = ("; mutation outcome unknown; do not retry automatically; reconcile with read-only queries"
@@ -222,6 +229,167 @@ def add_profile_commands(sub: argparse._SubParsersAction) -> None:
     remove = profile_sub.add_parser("remove", help="remove an inactive legacy OMP adapter profile")
     remove.add_argument("--adapter", choices=["omp"], required=True)
     remove.add_argument("name")
+
+    profile_sub.add_parser("hidden", help="list the profiles you have hidden (read-only)")
+    for action in ("hide", "show"):
+        visibility = profile_sub.add_parser(
+            action, help=f"{action} one built-in profile in every picker (dry run first)"
+        )
+        visibility.add_argument("target", metavar="HARNESS/PROFILE", help="ids from 'utp profiles list'")
+        visibility.add_argument(
+            "--confirm", action="store_true", help=f"actually {action} the profile (default: dry run)"
+        )
+
+
+def add_dial_commands(sub: argparse._SubParsersAction) -> None:
+    dials = sub.add_parser("dials", help="list usage dials, enable or disable one (dry run first)")
+    actions = dials.add_subparsers(dest="dials_cmd", required=True)
+    actions.add_parser("list", help="list every usage dial (read-only)")
+    for action in ("enable", "disable"):
+        command = actions.add_parser(action, help=f"{action} one dial, keeping its other settings")
+        command.add_argument("id", help="dial ID from 'utp dials list'")
+        command.add_argument(
+            "--confirm", action="store_true", help=f"actually {action} the dial (default: dry run)"
+        )
+
+
+# Same contract as the server's profile visibility ids.
+VISIBILITY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+def is_printable_line(value, maximum: int) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= maximum
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
+
+
+def run_profiles_visibility(args: argparse.Namespace) -> None:
+    command = f"profiles {args.profiles_cmd}"
+    if args.profiles_cmd == "hidden":
+        response = call({"cmd": "profiles.visibility", "action": "list"})
+        print_error(response)
+        entries = response.get("hidden")
+        if not isinstance(entries, list):
+            raise SystemExit(f"utp {command}: malformed profile visibility list reply")
+        keys = set()
+        for entry in entries:
+            harness = entry.get("harnessId") if isinstance(entry, dict) else None
+            profile = entry.get("profileId") if isinstance(entry, dict) else None
+            if not (
+                isinstance(harness, str)
+                and isinstance(profile, str)
+                and VISIBILITY_ID_RE.fullmatch(harness)
+                and VISIBILITY_ID_RE.fullmatch(profile)
+            ):
+                raise SystemExit(f"utp {command}: malformed hidden profile in reply")
+            keys.add(f"{harness}/{profile}")
+        for key in sorted(keys):
+            print(key)
+        if not keys:
+            print("no hidden profiles", file=sys.stderr)
+        return
+    harness, separator, profile = (args.target or "").strip().partition("/")
+    if not (separator and VISIBILITY_ID_RE.fullmatch(harness) and VISIBILITY_ID_RE.fullmatch(profile)):
+        raise SystemExit(
+            f"utp {command}: HiddenProfileError: expected HARNESS/PROFILE, each 1-64 lowercase "
+            "letters, digits, '.', '_' or '-', starting with a letter or digit"
+        )
+    response = call({
+        "cmd": "profiles.visibility",
+        "action": args.profiles_cmd,
+        "harnessId": harness,
+        "profile": profile,
+        "confirm": bool(args.confirm),
+    })
+    print_error(response)
+    if response.get("confirmed") is not bool(args.confirm):
+        raise SystemExit(f"utp {command}: unexpected reply; run 'utp profiles hidden' to check")
+    state = "hidden" if args.profiles_cmd == "hide" else "shown"
+    if not args.confirm:
+        plan = response.get("would")
+        if not isinstance(plan, dict) or type(plan.get("change")) is not bool:
+            raise SystemExit(f"utp {command}: malformed profile visibility dry-run reply")
+        if not plan["change"]:
+            print(f"utp {command}: {harness}/{profile} is already {state}; dry run, nothing to change")
+        else:
+            print(
+                f"utp {command}: would {args.profiles_cmd} {harness}/{profile}; "
+                "dry run, re-run with --confirm to apply"
+            )
+    elif type(response.get("changed")) is not bool:
+        raise SystemExit(f"utp {command}: unexpected reply; run 'utp profiles hidden' to check")
+    elif not response["changed"]:
+        print(f"utp {command}: {harness}/{profile} was already {state}")
+    else:
+        print(f"utp {command}: {state} {harness}/{profile}")
+
+
+def read_dial_catalog(command: str) -> tuple[int, list[dict]]:
+    response = call({"cmd": "provider.dials", "action": "list"}, timeout=50)
+    print_error(response)
+    catalog = response.get("catalog")
+    revision = catalog.get("revision") if isinstance(catalog, dict) else None
+    dials = catalog.get("dials") if isinstance(catalog, dict) else None
+    if (
+        type(revision) is not int
+        or not 0 <= revision <= 18446744073709551615
+        or not isinstance(dials, list)
+    ):
+        raise SystemExit(f"utp {command}: malformed dial catalog reply")
+    seen = set()
+    for dial in dials:
+        if (
+            not isinstance(dial, dict)
+            or not is_printable_line(dial.get("id"), 64)
+            or dial["id"] in seen
+            or not is_printable_line(dial.get("name"), 100)
+            or type(dial.get("enabled")) is not bool
+            or type(dial.get("order")) is not int
+            or dial.get("kind") not in ("builtin", "http")
+        ):
+            raise SystemExit(f"utp {command}: malformed dial in catalog reply")
+        seen.add(dial["id"])
+    return revision, dials
+
+
+def run_dials(args: argparse.Namespace) -> None:
+    command = f"dials {args.dials_cmd}"
+    revision, dials = read_dial_catalog(command)
+    if args.dials_cmd == "list":
+        for dial in sorted(dials, key=lambda d: (d["order"], d["id"])):
+            state = "enabled" if dial["enabled"] else "disabled"
+            print(f"{dial['id']}\t{state}\t{dial['kind']}\t{dial['order']}\t{dial['name']}")
+        return
+    wanted = args.dials_cmd == "enable"
+    dial = next((item for item in dials if item.get("id") == args.id), None)
+    if dial is None:
+        raise SystemExit(f"utp {command}: no dial with that id; see 'utp dials list'")
+    if dial.get("enabled") is wanted:
+        print(f"utp {command}: dial {args.id} is already {args.dials_cmd}d")
+        return
+    if not args.confirm:
+        print(
+            f"utp {command}: would {args.dials_cmd} dial {args.id}; "
+            "dry run, re-run with --confirm to apply"
+        )
+        return
+    # The whole existing dial goes back with only `enabled` changed, so no window mapping,
+    # endpoint, credential reference or order is lost; the revision read above guards the write.
+    response = call({
+        "cmd": "provider.dials",
+        "action": "upsert",
+        "config": {**dial, "enabled": wanted},
+        "expectedRevision": revision,
+    }, timeout=50)
+    if not response.get("ok") and "revision conflict" in str(response.get("error", "")).lower():
+        raise SystemExit(
+            f"utp {command}: DialRevisionConflictError: the dial catalog changed after it was read; "
+            f"nothing was changed, rerun 'utp dials {args.dials_cmd} {args.id} --confirm'"
+        )
+    print_error(response)
+    print(f"utp {command}: dial {args.id} {args.dials_cmd}d")
 
 
 def new_receipt_id() -> str:
@@ -540,7 +708,7 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="2.5.0")
+    parser.add_argument("--version", action="version", version="2.6.0")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")
@@ -683,6 +851,7 @@ def main() -> None:
         help="assert that the user explicitly authorized deletion",
     )
     add_profile_commands(sub)
+    add_dial_commands(sub)
 
     args = parser.parse_args()
 
@@ -720,6 +889,9 @@ def main() -> None:
                 state = "active" if profile.get("active") else "inactive"
                 print(f"{profile['name']}\t{state}")
             return
+        if args.profiles_cmd in ("hidden", "hide", "show"):
+            run_profiles_visibility(args)
+            return
         if args.profiles_cmd == "create":
             response = call(profile_create_request(args))
             print_error(response)
@@ -728,6 +900,10 @@ def main() -> None:
             return
         response = call({"cmd": "profiles.remove", "name": args.name})
         print_error(response)
+        return
+
+    if args.cmd == "dials":
+        run_dials(args)
         return
 
     if args.cmd == "savings":
