@@ -66,7 +66,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), response)
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
-        self.assertEqual(result.stdout.strip(), '2.6.0')
+        self.assertEqual(result.stdout.strip(), '2.6.1')
 
     def test_refit_requests_one_terminal_or_all(self):
         sid = '77777777-7777-4777-8777-777777777777'
