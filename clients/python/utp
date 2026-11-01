@@ -714,7 +714,7 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="2.7.0")
+    parser.add_argument("--version", action="version", version="2.8.0")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")
@@ -745,7 +745,10 @@ def main() -> None:
     send.add_argument("--no-enter", action="store_true")
 
     open = sub.add_parser("open", help="start a new UltraTerm session")
-    open.add_argument("--harness", default="steak-pi", help="UltraTerm harness id (default: steak-pi; omp selects legacy adapter)")
+    # No built-in harness default: the operator names the harness or sets
+    # UTP_HARNESS. "omp" is only meaningful as the protocol's legacy adapter.
+    open.add_argument("--harness", default=os.environ.get("UTP_HARNESS"),
+                      help="UltraTerm harness id (set --harness or UTP_HARNESS; no built-in default)")
     open.add_argument("--profile", required=True, help="UltraTerm Profile id within the selected harness")
     open.add_argument("--title", help="display title for the new terminal")
     open.add_argument("--confirm", action="store_true",
@@ -756,7 +759,9 @@ def main() -> None:
         help="replace an OMP terminal profile in place (backend limitation)",
     )
     switch_profile.add_argument("profile", help="legacy OMP adapter profile to launch")
-    switch_profile.add_argument("--harness", choices=["omp"], default="omp", help="in-place backend currently supports omp only")
+    # "omp" is the protocol's only in-place adapter; keep it as technical identity.
+    switch_profile.add_argument("--harness", choices=["omp"], default="omp",
+                                help="in-place backend currently supports omp only")
     switch_profile.add_argument("--slot", type=int, help="terminal slot; defaults to ULTRATERM_SLOT")
     switch_profile.add_argument("--confirm", action="store_true",
                                 help="actually switch the profile (default: dry run)")
@@ -768,7 +773,7 @@ def main() -> None:
         help="transfer a compact context packet to a replacement or new worker",
     )
     handoff.add_argument("--profile", required=True, help="UltraTerm Profile id for the receiving worker")
-    handoff.add_argument("--harness", help="new slot: defaults to steak-pi; in-place: omp only (default)")
+    handoff.add_argument("--harness", help="new slot: required (--harness or UTP_HARNESS); in-place: omp only")
     target = handoff.add_mutually_exclusive_group(required=True)
     target.add_argument("--slot", type=int, help="replace the worker in this slot")
     target.add_argument("--new-slot", action="store_true", help="open the lowest free worker slot")
@@ -961,7 +966,14 @@ def main() -> None:
         return
 
     if args.cmd == "handoff":
-        harness = args.harness or ("steak-pi" if args.new_slot else "omp")
+        harness = args.harness or os.environ.get("UTP_HARNESS")
+        if not args.new_slot:
+            # In-place replacement is implemented only for the protocol's legacy OMP
+            # adapter. That is a protocol-level technical limitation, not a provider
+            # preference, so "omp" is the documented in-place identity.
+            harness = harness or "omp"
+        if not harness:
+            sys.exit("utp handoff: --harness required to open a new slot (set --harness or UTP_HARNESS; no built-in default)")
         if not args.new_slot and harness != "omp":
             sys.exit("utp handoff: in-place backend supports omp only; use --new-slot for other harnesses")
         packet = handoff_packet_path(args.packet)
@@ -1089,6 +1101,8 @@ def main() -> None:
         return
 
     if args.cmd == "open":
+        if not args.harness:
+            sys.exit("utp open: --harness required (set --harness or UTP_HARNESS; no built-in default)")
         request = {"cmd": "open", "harnessId": args.harness, "profile": args.profile, "confirm": args.confirm}
         if args.title:
             request["title"] = args.title

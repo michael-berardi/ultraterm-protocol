@@ -77,7 +77,7 @@ class ExampleScriptTests(unittest.TestCase):
         link.symlink_to(target)
         for shell in SHELLS:
             with self.subTest(shell=shell):
-                result = self.run_example(shell, "manager-delegate.sh", str(link))
+                result = self.run_example(shell, "manager-delegate.sh", str(link), PROFILE="profile-name")
 
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("not a symlink", result.stderr)
@@ -90,7 +90,7 @@ class ExampleScriptTests(unittest.TestCase):
         for shell in SHELLS:
             with self.subTest(shell=shell):
                 packet.chmod(0o644)
-                result = self.run_example(shell, "manager-delegate.sh", str(packet))
+                result = self.run_example(shell, "manager-delegate.sh", str(packet), PROFILE="profile-name")
 
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(stat.S_IMODE(os.stat(packet).st_mode), 0o600)

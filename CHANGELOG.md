@@ -2,6 +2,16 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.0] - 2026-11-01
+
+Removes the reference client's built-in provider and profile defaults so the operator names the harness and the worker profile. The wire version stays 2; no command or field changed.
+
+### Changed
+
+- `utp open --harness` and a new-slot `utp handoff` no longer default to a built-in harness. The operator names the harness with `--harness` or sets `UTP_HARNESS`; a missing choice exits with a clear error. In-place replacement keeps the protocol's documented legacy OMP adapter as its technical identity.
+- `examples/manager-delegate.sh` no longer defaults `PROFILE` to a sample profile name; the operator must set `PROFILE`.
+- `tests/test_neutrality.py` scans the shipped trees and root docs, guards against a vacuous pass, and documents the empty provider-adapter and technical-identity allowlists.
+
 ## [2.7.0] - 2026-11-01
 
 Makes the shipped documentation provider-neutral by removing the maintainer's personal name from README links and adding a neutrality test that fails if a model id or personal name returns to the shipped protocol, client or example files. The wire version stays 2; no command or field changed.
