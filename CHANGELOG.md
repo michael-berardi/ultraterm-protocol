@@ -2,6 +2,18 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.7.0] - 2026-11-01
+
+Makes the shipped documentation provider-neutral by removing the maintainer's personal name from README links and adding a neutrality test that fails if a model id or personal name returns to the shipped protocol, client or example files. The wire version stays 2; no command or field changed.
+
+### Changed
+
+- README release, license and clone links now use the neutral placeholder `Alex` instead of a personal GitHub username.
+
+### Added
+
+- `tests/test_neutrality.py`: scans `protocols/`, `clients/`, `examples/` and `README.md` for built-in model choices and personal names; excludes synthetic test fixtures and documents provider-adapter and technical-identity exceptions.
+
 ## [2.6.1] - 2026-10-11
 
 Corrects the 2.6.0 documentation against the UltraTerm 3.2.10 server source and fixes the reference client and its tests. The wire version stays 2; no command or field changed.
