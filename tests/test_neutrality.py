@@ -4,9 +4,10 @@ project's name: those belong in the operator's own configuration. This test keep
 that way. Modelled on Carl's test/neutrality.test.ts.
 
 Tests' synthetic fixtures and test data are excluded from the scan by construction:
-only protocols/, clients/, examples/ and README.md are read. Provider-adapter files
-that must name their own provider catalog and product technical identity (bundle ids)
-may stay when allowlisted below with a comment.
+only protocols/, clients/, examples/ and the root docs are read. LICENSE copyright and
+package metadata author fields are excluded from the scan on purpose: legal attribution
+stays. Provider-adapter files that must name their own provider catalog and product
+technical identity (bundle ids) may stay when allowlisted below with a comment.
 """
 
 import re
