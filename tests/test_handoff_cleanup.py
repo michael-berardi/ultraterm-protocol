@@ -171,6 +171,8 @@ class HandoffCliTests(unittest.TestCase):
         return caught.exception, stdout.getvalue(), stderr.getvalue()
 
     def handoff(self, *extra: str) -> list[str]:
+        # The client ships no default harness: a new-slot handoff names one explicitly.
+        harness = ["--harness", "steak-pi"] if "--new-slot" in extra else []
         return [
             "handoff",
             "--profile",
@@ -181,6 +183,7 @@ class HandoffCliTests(unittest.TestCase):
             "1",
             "--confirm",
             "--user-authorized",
+            *harness,
             *extra,
         ]
 

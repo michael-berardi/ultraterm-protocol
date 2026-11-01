@@ -3,7 +3,8 @@ set -eu
 
 MANAGER_SLOT=${MANAGER_SLOT:-1}
 WORKER_SLOT=${WORKER_SLOT:-2}
-PROFILE=${PROFILE:-quality}
+# No built-in profile choice: the operator names the worker's UltraTerm Profile.
+: "${PROFILE:?Set PROFILE to the worker UltraTerm Profile id}"
 PACKET=${1:-/tmp/ultraterm-handoff.md}
 
 # chmod follows symlinks, so refuse one before changing any mode.

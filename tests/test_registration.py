@@ -288,6 +288,8 @@ class HandoffRegistrationTestCase(RegistrationTestCase):
             [
                 "handoff",
                 "--new-slot",
+                "--harness",
+                "steak-pi",
                 "--profile",
                 "quality",
                 "--packet",
@@ -351,6 +353,8 @@ class HandoffRegistrationTestCase(RegistrationTestCase):
             [
                 "handoff",
                 "--new-slot",
+                "--harness",
+                "steak-pi",
                 "--profile",
                 "quality",
                 "--packet",
@@ -457,6 +461,8 @@ class HandoffRegistrationTestCase(RegistrationTestCase):
             [
                 "handoff",
                 "--new-slot",
+                "--harness",
+                "steak-pi",
                 "--profile",
                 "quality",
                 "--packet",

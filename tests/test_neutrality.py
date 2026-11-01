@@ -1,6 +1,13 @@
-"""Neutrality guard: UTP ships no built-in model, provider or fallback choice and no
-person's, client's or project's names. Those belong in the operator's own config and
-environment. Modelled on Carl's test/neutrality.test.ts."""
+"""UTP is a neutral tool. Its shipped protocol, client, examples and README carry no
+built-in model id, provider route or fallback choice and no person's, client's or
+project's name: those belong in the operator's own configuration. This test keeps it
+that way. Modelled on Carl's test/neutrality.test.ts.
+
+Tests' synthetic fixtures and test data are excluded from the scan by construction:
+only protocols/, clients/, examples/ and README.md are read. Provider-adapter files
+that must name their own provider catalog and product technical identity (bundle ids)
+may stay when allowlisted below with a comment.
+"""
 
 import re
 import unittest
@@ -8,10 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Concrete model ids and provider routes that only an operator should choose. A provider
-# adapter may name its own provider catalog but must not set a default; there are no
-# adapter files in this repository today, so ADAPTERS stays empty. Product technical
-# identity (bundle ids) may stay when allowlisted in TECHNICAL_IDENTITY with a comment.
+# Concrete model ids and provider routes that only an operator should choose. This
+# mirrors the job's audit regex. Adapter code that lists a provider's own catalog and
+# product technical identity are the only exceptions, and both allowlists are empty
+# today because this repository ships neither.
 MODEL_CHOICE = re.compile(
     r"gpt-[56][a-z0-9.-]*|deepseek[a-z0-9.-]*|opencode-go/|openrouter/|:exacto|"
     r"mimo-v[0-9][a-z0-9.-]*|glm-[0-9][a-z0-9.-]*|"
@@ -19,20 +26,20 @@ MODEL_CHOICE = re.compile(
     re.IGNORECASE,
 )
 
-# Names of the people and organisations this protocol was first built for: never shipped.
+# Names of the people and organisations UTP was first built for: never shipped.
 PERSONAL = re.compile(
     r"Mike|Berardi|Kate|Felix|Lucero|PlataPlace|Mouseia|Liberty Design|"
     r"libertydesign|UltraLDSBot|/Users/",
     re.IGNORECASE,
 )
 
-# Allowlisted provider-adapter files: relative paths from ROOT. Empty today.
+# Allowlisted provider-adapter files (relative to ROOT). Empty today.
 ADAPTERS: tuple = ()
 
-# Allowlisted product technical identity (bundle ids): relative paths from ROOT. Empty today.
+# Allowlisted product technical identity strings, each with a reason. Empty today.
 TECHNICAL_IDENTITY: tuple = ()
 
-# Shipped trees scanned for choices and names. tests/ is excluded on purpose: its
+# Shipped trees scanned for choices and names. tests/ is deliberately excluded: its
 # synthetic fixtures legitimately use placeholder harness and profile names.
 SHIPPED_DIRS = ("protocols", "clients", "examples")
 
@@ -68,7 +75,7 @@ def scan(pattern):
     hits = []
     for path in shipped_files():
         rel = str(path.relative_to(ROOT))
-        if rel in ADAPTERS or rel in TECHNICAL_IDENTITY:
+        if rel in ADAPTERS or any(rel.endswith(a) for a in ADAPTERS):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -90,12 +97,13 @@ class NeutralityTests(unittest.TestCase):
         self.assertEqual(hits, [], "Personal or project name in shipped files")
 
     def test_scan_actually_reads_the_shipped_files(self):
-        # Guard against a vacuous pass: the scan set must be non-empty and the matcher
-        # must catch a planted sample.
+        # Guard against a vacuous pass: the scan set must be non-empty, must include the
+        # known shipped files, and the matchers must catch planted samples.
         files = list(shipped_files())
         self.assertGreater(len(files), 0)
         names = {str(p.relative_to(ROOT)) for p in files}
-        for expected in ("README.md", "protocols/v2.md", "clients/python/utp"):
+        for expected in ("README.md", "protocols/v2.md", "clients/python/utp",
+                         "examples/manager-delegate.sh"):
             self.assertIn(expected, names)
         self.assertTrue(MODEL_CHOICE.search("gpt-5.5 and openrouter/auto"))
         self.assertTrue(PERSONAL.search("/Users/alex/thing"))
