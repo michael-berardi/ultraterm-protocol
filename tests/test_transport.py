@@ -14,7 +14,7 @@ CLIENT = Path(__file__).resolve().parents[1] / 'clients/python/utp'
 
 class TransportTests(unittest.TestCase):
     def exchange(self, reply, args=None, delay=0):
-        with tempfile.TemporaryDirectory() as home:
+        with tempfile.TemporaryDirectory(dir="/tmp") as home:
             path = Path(home) / '.ultraterm'
             path.mkdir()
             requests = []
@@ -66,7 +66,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), response)
         result = subprocess.run([str(CLIENT), '--version'], text=True, capture_output=True)
-        self.assertEqual(result.stdout.strip(), '2.8.0')
+        self.assertEqual(result.stdout.strip(), '2.8.1')
 
     def test_refit_requests_one_terminal_or_all(self):
         sid = '77777777-7777-4777-8777-777777777777'
@@ -186,8 +186,19 @@ class TransportTests(unittest.TestCase):
         self.assertIn('mutation outcome unknown', result.stderr)
         self.assertLess(time.monotonic() - start, 13)
 
+    def test_socket_path_too_long_is_named_before_sending(self):
+        home = '/tmp/' + 'é' * 100
+        path = os.path.join(home, '.ultraterm', 'utp.sock')
+        result = subprocess.run([str(CLIENT), 'diagnose'], env={**os.environ, 'HOME': home},
+                                text=True, capture_output=True, timeout=2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SocketPathTooLongError', result.stderr)
+        self.assertIn(f'{len(os.fsencode(path))} bytes', result.stderr)
+        self.assertIn('no request sent', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
     def test_missing_and_refused_socket(self):
-        with tempfile.TemporaryDirectory() as home:
+        with tempfile.TemporaryDirectory(dir="/tmp") as home:
             path = Path(home) / '.ultraterm'
             path.mkdir()
             for stale in [False, True]:

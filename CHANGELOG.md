@@ -2,6 +2,13 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.1] - 2026-11-01
+
+### Fixed
+
+- Socket-based tests use short private temporary directories even when `TMPDIR` is long.
+- The reference client reports `SocketPathTooLongError` and the path length in bytes instead of a generic disconnect when the control socket path exceeds the platform limit.
+
 ## [2.8.0] - 2026-11-01
 
 Removes the reference client's built-in provider and profile defaults so the operator names the harness and the worker profile. The wire version stays 2; no command or field changed.

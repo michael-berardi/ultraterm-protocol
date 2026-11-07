@@ -31,7 +31,7 @@ class VisibilityAndDialTests(unittest.TestCase):
         With no replies scripted, the server still listens and records any connection as an error.
         """
         requests, errors, accepted = [], [], []
-        with tempfile.TemporaryDirectory() as home:
+        with tempfile.TemporaryDirectory(dir="/tmp") as home:
             path = Path(home) / '.ultraterm'
             path.mkdir()
             with socket.socket(socket.AF_UNIX) as server:

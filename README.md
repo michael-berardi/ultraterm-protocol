@@ -68,7 +68,7 @@ utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The current release is 2.8.0 (`utp --version`); the wire protocol is v2. See
+The current release is 2.8.1 (`utp --version`); the wire protocol is v2. See
 the [changelog](CHANGELOG.md).
 
 ## Protocol v2
@@ -253,7 +253,8 @@ UTP is command-capable. Servers must enforce the same-user Unix socket, director
 Run `utp diagnose` to check the control socket without inspecting terminal output.
 An older server may reject this additive command; that does not change v2 compatibility.
 The CLI bounds a reply to 1 MiB and the exchange to a 10-second deadline. It reports
-missing/refused sockets, timeout, disconnect, truncated lines, invalid JSON, and invalid
+missing/refused sockets, an overlong socket path (`SocketPathTooLongError`, with its byte length),
+timeout, disconnect, truncated lines, invalid JSON, and invalid
 reply envelopes without Python tracebacks. `inspect` prints plain text without
 requiring any external codec.
 

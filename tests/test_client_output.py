@@ -12,7 +12,7 @@ CLIENT = Path(__file__).resolve().parents[1] / "clients" / "python" / "utp"
 
 class ClientOutputTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(dir="/tmp")
         self.root = Path(self.temp.name)
         self.socket_dir = self.root / ".ultraterm"
         self.socket_dir.mkdir()

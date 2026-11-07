@@ -70,7 +70,7 @@ class MockControlSocket:
 
 class RegistrationTestCase(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory(dir="/tmp")
         self.home = Path(self.temporary.name)
         (self.home / ".ultraterm").mkdir()
 

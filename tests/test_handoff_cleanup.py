@@ -68,7 +68,8 @@ class ScriptedServer:
     def __init__(self, handler):
         self.handler = handler
         self.requests: list[dict] = []
-        self.root = tempfile.mkdtemp(dir=tempfile.gettempdir())
+        self.temporary = tempfile.TemporaryDirectory(dir="/tmp")
+        self.root = self.temporary.name
         self.path = os.path.join(self.root, "utp.sock")
         self._stop = False
         self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -110,6 +111,7 @@ class ScriptedServer:
         self._stop = True
         self._thread.join(timeout=5)
         self._listener.close()
+        self.temporary.cleanup()
 
     def commands(self) -> list[str]:
         return [request.get("cmd") for request in self.requests]
