@@ -3,14 +3,16 @@ built-in model id, provider route or fallback choice and no person's, client's o
 project's name: those belong in the operator's own configuration. This test keeps it
 that way. Modelled on Carl's test/neutrality.test.ts.
 
-Tests' synthetic fixtures and test data are excluded from the scan by construction:
-only protocols/, clients/, examples/ and the root docs are read. LICENSE copyright and
+Model choices are checked in shipped files; personal terms are also checked in tests
+and docs, except this test itself. LICENSE copyright and
 package metadata author fields are excluded from the scan on purpose: legal attribution
 stays. Provider-adapter files that must name their own provider catalog and product
 technical identity (bundle ids) may stay when allowlisted below with a comment.
 """
 
+import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,8 +31,8 @@ MODEL_CHOICE = re.compile(
 
 # Names of the people and organisations UTP was first built for: never shipped.
 PERSONAL = re.compile(
-    r"Mike|Berardi|Dana|Felix|acme|acme|Mouseia|Liberty Design|"
-    r"libertydesign|acme|/Users/",
+    r"Mike|Berardi|Felix|Mouseia|Liberty Design|"
+    r"libertydesign|/Users/",
     re.IGNORECASE,
 )
 
@@ -40,8 +42,7 @@ ADAPTERS: tuple = ()
 # Allowlisted product technical identity strings, each with a reason. Empty today.
 TECHNICAL_IDENTITY: tuple = ()
 
-# Shipped trees scanned for choices and names. tests/ is deliberately excluded: its
-# synthetic fixtures legitimately use placeholder harness and profile names.
+# Shipped trees scanned for choices and names.
 SHIPPED_DIRS = ("protocols", "clients", "examples")
 
 # Shipped documentation at the repository root. SECURITY.md is included so a personal
@@ -72,6 +73,56 @@ def shipped_files():
             yield doc
 
 
+def load_private_terms(path=None):
+    path = Path(path) if path is not None else Path(
+        os.environ.get("OSS_PRIVATE_TERMS", "~/.config/oss-audit/names.txt")
+    ).expanduser()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return None
+    terms = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
+    alternatives = []
+    for term in terms:
+        alternatives.append((r"(?<!\w)" if re.match(r"\w", term[0]) else "")
+                            + re.escape(term)
+                            + (r"(?!\w)" if re.match(r"\w", term[-1]) else ""))
+    return re.compile("|".join(alternatives), re.IGNORECASE) if alternatives else None
+
+
+def personal_files():
+    yield from shipped_files()
+    seen = set()
+    for name in ("tests", "test", "Tests", "docs"):
+        base = ROOT / name
+        if not base.is_dir() or (base.stat().st_dev, base.stat().st_ino) in seen:
+            continue
+        seen.add((base.stat().st_dev, base.stat().st_ino))
+        for path in base.rglob("*"):
+            rel = path.relative_to(ROOT)
+            if (path.is_file() and not path.samefile(__file__)
+                    and path.suffix not in SKIP_SUFFIXES):
+                yield path
+
+
+def scan_personal(pattern):
+    hits = []
+    if pattern is None:
+        return hits
+    for path in personal_files():
+        rel = str(path.relative_to(ROOT))
+        if rel in ADAPTERS or any(rel.endswith(a) for a in ADAPTERS):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                hits.append(f"{rel}:{number}")
+    return hits
+
+
 def scan(pattern):
     hits = []
     for path in shipped_files():
@@ -94,8 +145,20 @@ class NeutralityTests(unittest.TestCase):
         self.assertEqual(hits, [], "Built-in model or provider choice in shipped files")
 
     def test_shipped_files_name_no_person_or_project(self):
-        hits = scan(PERSONAL)
+        hits = scan_personal(PERSONAL) + scan_personal(load_private_terms())
         self.assertEqual(hits, [], "Personal or project name in shipped files")
+
+    def test_private_terms_loader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            terms = Path(tmp) / "terms.txt"
+            terms.write_text("# comment\n\nzzqx-private-term\n", encoding="utf-8")
+            pattern = load_private_terms(terms)
+            sample = Path(tmp) / "sample.txt"
+            sample.write_text("A ZZQX-private-term here", encoding="utf-8")
+            self.assertIsNotNone(pattern.search(sample.read_text(encoding="utf-8")))
+            sample.write_text("ordinary text", encoding="utf-8")
+            self.assertIsNone(pattern.search(sample.read_text(encoding="utf-8")))
+            self.assertIsNone(pattern.search("xzzqx-private-term"))
 
     def test_scan_actually_reads_the_shipped_files(self):
         # Guard against a vacuous pass: the scan set must be non-empty, must include the
