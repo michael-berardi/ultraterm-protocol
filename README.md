@@ -289,3 +289,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The v1 contract is frozen; identity-boun
 ## License
 
 [MIT](LICENSE)
+
+---
+
+Part of [Pareto Cybernetics](https://paretocybernetics.com/projects/ultraterm-protocol/): free, private, open-source tools for working with AI agents.
