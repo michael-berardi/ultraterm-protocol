@@ -2,6 +2,13 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.2] - 2026-11-10
+
+### Fixed
+
+- Spec 3.13 says `open` and `profile.switch` refuse a hidden OMP profile with an error beginning `HiddenProfileError:` (for example `HiddenProfileError: omp/NAME is hidden in Settings`), and that `hide omp/NAME` changes what the OMP profile picker shows. UltraTerm 4.8.13 and later implement this; the wording in 2.6.1 and 2.8.1 that said OMP profiles were not checked yet is superseded.
+- For a non-OMP harness, `open` still returns the `unknown UltraTerm Profile` error for a hidden profile, as documented in 2.6.1.
+
 ## [2.8.1] - 2026-11-01
 
 ### Fixed
@@ -50,8 +57,8 @@ Corrects the 2.6.0 documentation against the UltraTerm 3.2.10 server source and 
 
 ### Known issues
 
-- For OMP profiles, `open` does not refuse a hidden profile, and `profile.switch` does not check visibility. For a non-OMP harness, `open` refuses with the `unknown UltraTerm Profile` error, not `HiddenProfileError:`. `hide omp/NAME` is stored but changes nothing. Server fix is open work in UltraTerm, not in this release.
-- `profiles hidden` and `profiles show` do not account for profiles hidden because their provider was removed. Server fix is open work in UltraTerm, not in this release.
+- `profiles hidden` and `profiles show` do not account for profiles hidden because their provider was removed. Only bundled harness profiles have that rule; the server does not apply it to OMP profiles yet.
+- For a non-OMP harness, `open` refuses a hidden profile with the `unknown UltraTerm Profile` error, not `HiddenProfileError:`.
 - Some `provider.dials` content-rule messages and the busy refusal (`Dial configuration busy; retry`) are not documented in 3.14.
 
 ## [2.6.0] - 2026-10-11
