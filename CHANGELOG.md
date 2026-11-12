@@ -2,6 +2,12 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.3] - 2026-11-12
+
+### Fixed
+
+- README: real owner in install, badge and clone links; neutrality test allows the repo's own URL.
+
 ## [2.8.2] - 2026-11-10
 
 ### Fixed

@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Alex/ultraterm-protocol/releases/latest"><img src="https://img.shields.io/github/v/release/Alex/ultraterm-protocol?label=release" alt="Latest release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Alex/ultraterm-protocol" alt="MIT License" /></a>
+  <a href="https://github.com/michael-berardi/ultraterm-protocol/releases/latest"><img src="https://img.shields.io/github/v/release/michael-berardi/ultraterm-protocol?label=release" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/michael-berardi/ultraterm-protocol" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/wire-v2-blue" alt="Wire protocol v2" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
 </p>
@@ -53,7 +53,7 @@ To try the source client in this repository without replacing the managed
 binary, link it under another name:
 
 ```sh
-git clone https://github.com/Alex/ultraterm-protocol.git
+git clone https://github.com/michael-berardi/ultraterm-protocol.git
 ln -s "$PWD/ultraterm-protocol/clients/python/utp" ~/.local/bin/utp-source
 utp-source --version
 ```
@@ -68,7 +68,7 @@ utp close --slot 3                         # dry run: prints the session ID
 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
-The current release is 2.8.2 (`utp --version`); the wire protocol is v2. See
+The current release is 2.8.3 (`utp --version`); the wire protocol is v2. See
 the [changelog](CHANGELOG.md).
 
 ## Protocol v2

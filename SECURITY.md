@@ -8,7 +8,7 @@ release of the UTP reference client is supported.
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through
-[GitHub private vulnerability reporting](https://github.com/Alex/ultraterm-protocol/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/michael-berardi/ultraterm-protocol/security/advisories/new).
 Do not open a public issue for an undisclosed vulnerability.
 
 Include the affected version, your operating system, reproduction steps and

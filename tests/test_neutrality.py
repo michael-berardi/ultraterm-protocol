@@ -36,6 +36,18 @@ PERSONAL = re.compile(
     re.IGNORECASE,
 )
 
+# The repository's own canonical GitHub URL forms are the only place the owner name may
+# appear. Anything else containing the name still fails.
+OWN_URL = re.compile(
+    r"github\.com/michael-berardi/ultraterm-protocol(?![\w-])|"
+    r"img\.shields\.io/github/[a-z/-]+/michael-berardi/ultraterm-protocol(?![\w-])"
+)
+
+# Placeholder owners that must never appear in a README URL.
+PLACEHOLDER_OWNER = re.compile(
+    r"https?://[^\s)\"'>]*(example-user|your-org|your-github-username|Alex/|OWNER|<owner>)"
+)
+
 # Allowlisted provider-adapter files (relative to ROOT). Empty today.
 ADAPTERS: tuple = ()
 
@@ -118,7 +130,7 @@ def scan_personal(pattern):
         except UnicodeDecodeError:
             continue
         for number, line in enumerate(text.splitlines(), 1):
-            if pattern.search(line):
+            if pattern.search(OWN_URL.sub("", line)):
                 hits.append(f"{rel}:{number}")
     return hits
 
@@ -147,6 +159,18 @@ class NeutralityTests(unittest.TestCase):
     def test_shipped_files_name_no_person_or_project(self):
         hits = scan_personal(PERSONAL) + scan_personal(load_private_terms())
         self.assertEqual(hits, [], "Personal or project name in shipped files")
+
+    def test_readme_has_no_placeholder_owner_in_urls(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertEqual(PLACEHOLDER_OWNER.findall(text), [])
+        self.assertTrue(PLACEHOLDER_OWNER.search("https://github.com/Alex/x"))
+        self.assertTrue(PLACEHOLDER_OWNER.search("https://github.com/<owner>/x"))
+
+    def test_own_url_allowed_but_other_uses_fail(self):
+        own = "https://github.com/michael-berardi/ultraterm-protocol/releases"
+        self.assertEqual(PERSONAL.sub("", OWN_URL.sub("", own)).count("Berardi"), 0)
+        self.assertIsNotNone(PERSONAL.search(OWN_URL.sub("", "by michael-berardi")))
+        self.assertIsNotNone(PERSONAL.search(OWN_URL.sub("", "github.com/michael-berardi/other")))
 
     def test_private_terms_loader(self):
         with tempfile.TemporaryDirectory() as tmp:
