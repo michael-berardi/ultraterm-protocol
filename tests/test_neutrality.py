@@ -39,7 +39,7 @@ PERSONAL = re.compile(
 # The repository's own canonical GitHub URL forms are the only place the owner name may
 # appear. Anything else containing the name still fails.
 OWN_URL = re.compile(
-    r"github\.com/michael-berardi/ultraterm-protocol(?![\w-])|"
+    r"(?:github\.com|raw\.githubusercontent\.com)/michael-berardi/ultraterm-protocol(?![\w-])|"
     r"img\.shields\.io/github/[a-z/-]+/michael-berardi/ultraterm-protocol(?![\w-])"
 )
 
@@ -169,6 +169,11 @@ class NeutralityTests(unittest.TestCase):
     def test_own_url_allowed_but_other_uses_fail(self):
         own = "https://github.com/michael-berardi/ultraterm-protocol/releases"
         self.assertEqual(PERSONAL.sub("", OWN_URL.sub("", own)).count("Berardi"), 0)
+        raw = "https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.3/clients/python/utp"
+        self.assertIsNone(PERSONAL.search(OWN_URL.sub("", raw)))
+        for other in ("other", "ultraterm-protocol-private"):
+            self.assertIsNotNone(PERSONAL.search(OWN_URL.sub(
+                "", raw.replace("/ultraterm-protocol/", f"/{other}/"))))
         self.assertIsNotNone(PERSONAL.search(OWN_URL.sub("", "by michael-berardi")))
         self.assertIsNotNone(PERSONAL.search(OWN_URL.sub("", "github.com/michael-berardi/other")))
 

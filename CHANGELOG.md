@@ -2,6 +2,18 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.4] - 2026-11-15
+
+### Fixed
+
+- Reject UTF-16 and UTF-32 replies instead of silently accepting them as valid UTF-8 JSON Lines. Failed mutations still report an unknown outcome; wire fields and semantics are unchanged.
+- Document the required harness choice for new terminals and the longer receipt and dial-catalog deadlines.
+
+### Changed
+
+- Shorten the README and move detailed command and recovery guidance to `docs/usage.md`.
+- Run the source client directly after cloning, without a symlink or PATH setup; document the fixture-based test suite.
+
 ## [2.8.3] - 2026-11-12
 
 ### Fixed

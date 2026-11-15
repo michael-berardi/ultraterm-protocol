@@ -5,8 +5,8 @@
 ![Wire protocol v2](https://img.shields.io/badge/wire-v2-blue)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
-UTP lets local agents inspect and control UltraTerm terminal sessions over a
-private Unix socket. The reference CLI uses only Python’s standard library.
+UTP lets local agents inspect and control [UltraTerm](https://paretocybernetics.com/software/)
+terminal sessions over a private Unix socket. The reference CLI uses only Python’s standard library.
 Session IDs bind destructive operations to a specific terminal; bounded reads
 and receipt lookup help agents reconcile failures without replaying work.
 
@@ -16,46 +16,50 @@ Python 3 and a platform with Unix-domain sockets (tested with Python 3.15).
 
 ## Install
 
-UltraTerm manages its client at `~/.ultraterm/bin/utp`. Add it to your shell’s
-`PATH`:
+Download the single-file client; no package installation is needed:
 
 ```sh
-export PATH="$HOME/.ultraterm/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.3/clients/python/utp -o utp
+python3 utp --version
 ```
 
-For a source checkout, no package installation is needed:
+This pinned URL serves the current published release, **2.8.3**. The **2.8.4**
+URL (replace `v2.8.3` with `v2.8.4`) goes live when that tag is released.
+The source client is **2.8.4**; the wire protocol remains **v2**.
+
+### From source
 
 ```sh
 git clone https://github.com/michael-berardi/ultraterm-protocol.git
 python3 ultraterm-protocol/clients/python/utp --version
 ```
 
-The client release is **2.8.3**; the wire protocol remains **v2**. To keep the
-source client separate from the managed client, run it by the path above.
+For a checkout, use that client path in place of `utp` below. UltraTerm also
+manages a client at `~/.ultraterm/bin/utp`; you can run that path directly.
 
 ## First use
 
 With UltraTerm running, these commands only read session state:
 
 ```sh
-utp list
-utp inspect --slot 2 --lines 80
-utp diagnose
+python3 utp list
+python3 utp inspect --slot 2 --lines 80
+python3 utp diagnose
 ```
 
 Use the slot returned by `list`. Closing or replacing a session starts with a
 dry run; confirmation must bind to the session ID it printed:
 
 ```sh
-utp close --slot 3
-utp close --slot 3 --expected-id SESSION_ID --confirm
+python3 utp close --slot 3
+python3 utp close --slot 3 --expected-id SESSION_ID --confirm
 ```
 
 `send`, native messages and reports are not dry runs. Use them only with
 explicit authority. Opening a terminal requires a harness choice:
 
 ```sh
-utp open --harness HARNESS --profile PROFILE
+python3 utp open --harness HARNESS --profile PROFILE
 ```
 
 That command is a dry run; add `--confirm` only after approval. `UTP_HARNESS`
@@ -90,3 +94,7 @@ repository, so these tests do not verify its behavior.
 ## License
 
 [MIT](LICENSE)
+
+---
+
+Part of [Pareto Cybernetics](https://paretocybernetics.com/projects/ultraterm-protocol/): free, private, open-source tools for working with AI agents.
