@@ -19,13 +19,11 @@ Python 3 and a platform with Unix-domain sockets (tested with Python 3.15).
 Download the single-file client; no package installation is needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.3/clients/python/utp -o utp
+curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.4/clients/python/utp -o utp
 python3 utp --version
 ```
 
-This pinned URL serves the current published release, **2.8.3**. The **2.8.4**
-URL (replace `v2.8.3` with `v2.8.4`) goes live when that tag is released.
-The source client is **2.8.4**; the wire protocol remains **v2**.
+The URL is pinned to release **2.8.4**.
 
 ### From source
 
