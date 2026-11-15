@@ -184,7 +184,7 @@ def call(request: dict, timeout: float | None = None) -> dict:
     except OSError:
         fail("control socket disconnected or unavailable")
     try:
-        response = json.loads(line)
+        response = json.loads(line.decode("utf-8"))
     except (ValueError, UnicodeError, RecursionError):
         fail("malformed JSON reply")
     if not isinstance(response, dict) or type(response.get("ok")) is not bool:

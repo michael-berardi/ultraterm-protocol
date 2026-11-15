@@ -11,6 +11,7 @@ Contributions should keep UTP small, local, and interoperable.
 Before submitting a change:
 
 ```sh
+python3 -m unittest discover -s tests
 python3 -m py_compile clients/python/utp
 sh -n examples/manager-delegate.sh
 sh -n examples/worker-complete.sh

@@ -55,7 +55,7 @@ ADAPTERS: tuple = ()
 TECHNICAL_IDENTITY: tuple = ()
 
 # Shipped trees scanned for choices and names.
-SHIPPED_DIRS = ("protocols", "clients", "examples")
+SHIPPED_DIRS = ("protocols", "clients", "examples", "docs")
 
 # Shipped documentation at the repository root. SECURITY.md is included so a personal
 # reporting URL cannot return either.

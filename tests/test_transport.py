@@ -172,6 +172,15 @@ class TransportTests(unittest.TestCase):
                 self.assertIn(error, result.stderr)
                 self.assertNotIn('mutation outcome unknown', result.stderr)
 
+    def test_non_utf8_replies_are_rejected(self):
+        for encoding in ('utf-16', 'utf-32'):
+            with self.subTest(encoding=encoding):
+                reply = '{"ok":true}'.encode(encoding) + b'\n'
+                result, _ = self.exchange(reply, ['send', '--slot', '2', 'hello'])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('malformed JSON reply', result.stderr)
+                self.assertIn('mutation outcome unknown', result.stderr)
+
     def test_mutation_disconnect_is_unknown_and_not_retried(self):
         for reply in [b'', b'{}\n', b'{"ok":true}']:
             result, request = self.exchange(reply, ['send', '--slot', '2', 'hello'])
