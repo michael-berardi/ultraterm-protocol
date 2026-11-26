@@ -1,10 +1,5 @@
 # UltraTerm Terminal Protocol (UTP)
 
-[![Latest release](https://img.shields.io/github/v/release/michael-berardi/ultraterm-protocol?label=release)](https://github.com/michael-berardi/ultraterm-protocol/releases/latest)
-[![MIT License](https://img.shields.io/github/license/michael-berardi/ultraterm-protocol)](LICENSE)
-![Wire protocol v2](https://img.shields.io/badge/wire-v2-blue)
-![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-
 UTP lets local agents inspect and control [UltraTerm](https://paretocybernetics.com/software/)
 terminal sessions over a private Unix socket. The reference CLI uses only Python’s standard library.
 Session IDs bind destructive operations to a specific terminal; bounded reads
@@ -19,11 +14,20 @@ Python 3 and a platform with Unix-domain sockets (tested with Python 3.15).
 Download the single-file client; no package installation is needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.4/clients/python/utp -o utp
+curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.5/clients/python/utp -o utp
+python3 - <<'PY'
+import hashlib
+from pathlib import Path
+
+expected = "d723989ab259cdb182248a1e24cb4e2afc1c7ed094d951072fe8b8ba403a5966"
+actual = hashlib.sha256(Path("utp").read_bytes()).hexdigest()
+if actual != expected:
+    raise SystemExit(f"utp checksum mismatch: expected {expected}, got {actual}")
+PY
 python3 utp --version
 ```
 
-The URL is pinned to release **2.8.4**.
+The URL is pinned to release **2.8.5**; the SHA-256 check verifies the downloaded client before you run it.
 
 ### From source
 
@@ -74,6 +78,30 @@ The client never retries requests automatically. After a transport failure,
 a mutation may have happened: reconcile with read-only queries before taking
 further action. Receipt waits and dial catalog queries have longer deadlines
 than the default 10-second exchange.
+
+## Privacy
+
+The client sends nothing over the network. Each command talks only to the local
+Unix socket at `~/.ultraterm/utp.sock`; without a command it does nothing. There
+is no telemetry, analytics, crash reporting, update check or install ID. The
+client writes no files and keeps no history, logs or tokens.
+
+UltraTerm's server is a separate app. It documents storing session-to-manager
+routes in `~/.ultraterm/manager-map.json`. Handoff packets are files you create
+under `/tmp`; the client accepts only a regular file you own with no group or
+other access.
+
+`utp report` and `utp redact` pass your text or file path to a user-owned local
+executable at `~/.ultraterm/report-hook` (override with `UTP_REPORT_HOOK`), and
+only when you pass `--user-authorized`. That hook owns the destination and any
+credentials; if it delivers to a chat service, that service receives what you
+asked it to send. Native messages you send through UltraTerm go to agent hosts
+you configured; their model providers receive the prompts you send them. Text
+reports reject credential-shaped values before they reach the hook.
+
+To delete local UTP data: stop UltraTerm, remove `~/.ultraterm/manager-map.json`,
+remove your `/tmp` handoff packets, and remove any audit or log files your own
+report hook wrote. The client itself keeps no other state.
 
 ## Security
 

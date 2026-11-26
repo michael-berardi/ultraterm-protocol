@@ -2,6 +2,14 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.8.5] - 2026-11-26
+
+### Added
+
+- README `Privacy` section describing the local-only transport, the absence of telemetry, local files, user-owned report hooks and configured model providers.
+- The install snippet verifies a pinned SHA-256 of the downloaded client before running it. No remote badges are loaded when rendering the README.
+- `tests/test_privacy.py` fails if telemetry/analytics packages or endpoints, HTTP client imports, internet sockets or remote README badges are reintroduced.
+
 ## [2.8.4] - 2026-11-15
 
 ### Fixed
