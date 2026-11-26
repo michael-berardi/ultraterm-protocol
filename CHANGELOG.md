@@ -8,11 +8,15 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 - Update notice: after a successful command on a terminal, stderr says when a newer stable client exists, at most once a day per version. The check is one anonymous daily request to the public GitHub release record; it is silent off a terminal, in CI, under Claude Code, with `UTP_NO_UPDATE_CHECK=1` and after `utp update --checks off`. JSON Lines output is unchanged.
 - `utp update` verifies the release's SHA-256 before an atomic swap and keeps one rollback (`--rollback`). `--check` exits 0, 10 or 1; `--skip` hides one version; `--auto on|off|status` opts in to automatic installation (off by default). A git checkout runs `git pull --ff-only` instead, and UltraTerm's own copy updates with UltraTerm.
-- `clients/python/SHA256SUMS`, `docs/updates.md` and `PRIVACY.md`.
+- `clients/python/SHA256SUMS` and `docs/updates.md`.
+- `PRIVACY.md`: local-only protocol facts, the update check and download, dependency and installer facts, and a local-write table giving contents, lifetime, cleanup and deletion for the update state and log, the rollback copy, the staged download, installer files, server routes, handoff packets, report hooks, examples and test fixtures.
+- The README install snippet verifies a pinned SHA-256 of the downloaded client before running it.
+- `tests/test_privacy.py` fails if telemetry or analytics packages or endpoints, internet sockets, non-GitHub endpoints, network imports or file and log writes outside the named update functions, remote README badges, an overlong README `Privacy` section or an undocumented update write are introduced.
 
 ### Changed
 
 - The pinned install URL names 2.9.0.
+- README `Privacy` is six short lines (no telemetry, the anonymous daily check and its opt-out, what is stored and how to delete it) with a link to `PRIVACY.md`. The README loads no remote badges.
 
 ## [2.8.4] - 2026-11-15
 

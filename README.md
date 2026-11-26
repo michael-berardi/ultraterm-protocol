@@ -1,10 +1,5 @@
 # UltraTerm Terminal Protocol (UTP)
 
-[![Latest release](https://img.shields.io/github/v/release/michael-berardi/ultraterm-protocol?label=release)](https://github.com/michael-berardi/ultraterm-protocol/releases/latest)
-[![MIT License](https://img.shields.io/github/license/michael-berardi/ultraterm-protocol)](LICENSE)
-![Wire protocol v2](https://img.shields.io/badge/wire-v2-blue)
-![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-
 UTP lets local agents inspect and control [UltraTerm](https://paretocybernetics.com/software/)
 terminal sessions over a private Unix socket. The reference CLI uses only Python’s standard library.
 Session IDs bind destructive operations to a specific terminal; bounded reads
@@ -20,10 +15,19 @@ Download the single-file client; no package installation is needed:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.9.0/clients/python/utp -o utp
+python3 - <<'PY'
+import hashlib
+from pathlib import Path
+
+expected = "10919f0b7c5849471b3fdff5294b1e17197495f37d2adb5fc470975c1f1e1360"
+actual = hashlib.sha256(Path("utp").read_bytes()).hexdigest()
+if actual != expected:
+    raise SystemExit(f"utp checksum mismatch: expected {expected}, got {actual}")
+PY
 python3 utp --version
 ```
 
-The URL is pinned to release **2.9.0**.
+The URL is pinned to release **2.9.0**; the SHA-256 check verifies the downloaded client before you run it.
 
 ### From source
 
@@ -71,14 +75,17 @@ installation is off until you turn it on. See [docs/updates.md](docs/updates.md)
 
 ## Privacy
 
-UTP has no telemetry. On a terminal it makes one anonymous request a day to this
-repository's public GitHub release record, sending no version, identifier or usage data.
-It stays silent in CI, agents and scripts. Turn it off with `UTP_NO_UPDATE_CHECK=1` or
-`utp update --checks off`. Details: [PRIVACY.md](PRIVACY.md).
+UTP has no telemetry. Commands talk only to UltraTerm's same-user Unix socket.
+On a terminal it makes one anonymous request a day for the public latest-release record,
+sending no version, identifier or usage data; it stays silent in CI, agents and scripts.
+Turn it off with `UTP_NO_UPDATE_CHECK=1` or `utp update --checks off`.
+It stores only update state in your cache folder; `utp update --auto off` deletes it.
+Details, including update downloads and rollback: [PRIVACY.md](PRIVACY.md).
 
 ## Reference
 
 - [Commands, handoffs, reports and recovery](docs/usage.md)
+- [Privacy and local state](PRIVACY.md)
 - [Normative v2 specification](protocols/v2.md) and [frozen v1 contract](protocols/v1.md)
 - `utp --help` and `utp COMMAND --help` for client flags
 - [Changelog](CHANGELOG.md)
