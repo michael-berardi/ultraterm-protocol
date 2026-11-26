@@ -59,7 +59,7 @@ SHIPPED_DIRS = ("protocols", "clients", "examples", "docs")
 
 # Shipped documentation at the repository root. SECURITY.md is included so a personal
 # reporting URL cannot return either.
-SHIPPED_DOCS = ("README.md", "SECURITY.md")
+SHIPPED_DOCS = ("README.md", "SECURITY.md", "PRIVACY.md")
 
 SKIP_SUFFIXES = {".pyc", ".pyo", ".so", ".dylib"}
 
@@ -195,7 +195,7 @@ class NeutralityTests(unittest.TestCase):
         files = list(shipped_files())
         self.assertGreater(len(files), 0)
         names = {str(p.relative_to(ROOT)) for p in files}
-        for expected in ("README.md", "protocols/v2.md", "clients/python/utp",
+        for expected in ("README.md", "PRIVACY.md", "protocols/v2.md", "clients/python/utp",
                          "examples/manager-delegate.sh"):
             self.assertIn(expected, names)
         self.assertTrue(MODEL_CHOICE.search("gpt-5.5 and openrouter/auto"))

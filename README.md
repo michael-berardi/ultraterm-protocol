@@ -19,11 +19,11 @@ Python 3 and a platform with Unix-domain sockets (tested with Python 3.15).
 Download the single-file client; no package installation is needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.8.4/clients/python/utp -o utp
+curl -fsSL https://raw.githubusercontent.com/michael-berardi/ultraterm-protocol/v2.9.0/clients/python/utp -o utp
 python3 utp --version
 ```
 
-The URL is pinned to release **2.8.4**.
+The URL is pinned to release **2.9.0**.
 
 ### From source
 
@@ -62,6 +62,19 @@ python3 utp open --harness HARNESS --profile PROFILE
 
 That command is a dry run; add `--confirm` only after approval. `UTP_HARNESS`
 can supply the harness instead.
+
+## Updates
+
+On a terminal, `utp` says when a newer release exists. `utp update` installs it after
+verifying its SHA-256 checksum, and `utp update --check` only reports. Automatic
+installation is off until you turn it on. See [docs/updates.md](docs/updates.md).
+
+## Privacy
+
+UTP has no telemetry. On a terminal it makes one anonymous request a day to this
+repository's public GitHub release record, sending no version, identifier or usage data.
+It stays silent in CI, agents and scripts. Turn it off with `UTP_NO_UPDATE_CHECK=1` or
+`utp update --checks off`. Details: [PRIVACY.md](PRIVACY.md).
 
 ## Reference
 

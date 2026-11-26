@@ -2,6 +2,18 @@
 
 All notable changes are documented here. This project follows Keep a Changelog and Semantic Versioning.
 
+## [2.9.0] - 2026-11-26
+
+### Added
+
+- Update notice: after a successful command on a terminal, stderr says when a newer stable client exists, at most once a day per version. The check is one anonymous daily request to the public GitHub release record; it is silent off a terminal, in CI, under Claude Code, with `UTP_NO_UPDATE_CHECK=1` and after `utp update --checks off`. JSON Lines output is unchanged.
+- `utp update` verifies the release's SHA-256 before an atomic swap and keeps one rollback (`--rollback`). `--check` exits 0, 10 or 1; `--skip` hides one version; `--auto on|off|status` opts in to automatic installation (off by default). A git checkout runs `git pull --ff-only` instead, and UltraTerm's own copy updates with UltraTerm.
+- `clients/python/SHA256SUMS`, `docs/updates.md` and `PRIVACY.md`.
+
+### Changed
+
+- The pinned install URL names 2.9.0.
+
 ## [2.8.4] - 2026-11-15
 
 ### Fixed

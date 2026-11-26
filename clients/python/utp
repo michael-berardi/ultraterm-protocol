@@ -40,6 +40,8 @@ Usage:
   utp dials list                        # read-only: id, enabled, kind, order and name of every usage dial
   utp dials enable|disable ID [--confirm]
                                         # dry run by default
+  utp update [--check|--skip|--auto on|off|status|--checks on|off|status|--rollback]
+                                        # local client update; never sent to the socket
 """
 
 from __future__ import annotations
@@ -77,6 +79,420 @@ PROTECTED_VALUE_RE = re.compile(
 MAX_REPORT_ITEMS = 24
 MAX_SECTION_ITEMS = 12
 MAX_REPORT_ITEM_CHARS = 240
+
+# Client updates: one anonymous release lookup and local file operations. They never use
+# the control socket and do not change the wire protocol. See docs/updates.md.
+CLIENT_VERSION = "2.9.0"
+UPDATE_REPO_URL = "https://github.com/michael-berardi/ultraterm-protocol"
+UPDATE_USER_AGENT = "utp-update-check"
+UPDATE_INTERVAL = 24 * 60 * 60
+UPDATE_TIMEOUT = 4.0
+UPDATE_DOWNLOAD_TIMEOUT = 30.0
+UPDATE_MAX_BYTES = 2 * 1024 * 1024
+UPDATE_LOG_LIMIT = 256 * 1024
+ROLLBACK_MAX_AGE = 7 * 24 * 60 * 60
+PROCESS_STARTED = time.time()
+STABLE_VERSION_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+CLIENT_VERSION_LINE_RE = re.compile(rb'^CLIENT_VERSION = "([^"]*)"$', re.MULTILINE)
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+UPDATE_DEFAULTS = {
+    "checkedAt": 0, "latest": None, "error": None, "skip": None,
+    "auto": False, "checks": True, "autoAsked": False,
+    "notifiedVersion": None, "notifiedAt": 0,
+    "installFailed": None, "installError": None,
+}
+
+
+class UpdateError(Exception):
+    """A refused or failed update; the installed client is unchanged."""
+
+
+def parse_version(value):
+    """A stable x.y.z (optionally v-prefixed) as a tuple; anything else is None."""
+    match = STABLE_VERSION_RE.fullmatch(value.strip()) if isinstance(value, str) else None
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def is_newer(candidate, current=CLIENT_VERSION):
+    new, old = parse_version(candidate), parse_version(current)
+    return bool(new and old and new > old)
+
+
+def describe_error(exc):
+    text = CONTROL_CHARS_RE.sub(" ", str(exc)).strip()
+    return f"{type(exc).__name__}: {text}"[:240] if text else type(exc).__name__
+
+
+def update_dir():
+    if sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Caches")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "utp")
+
+
+def update_state_path():
+    return os.path.join(update_dir(), "update.json")
+
+
+def update_log_path():
+    return os.path.join(update_dir(), "update.log")
+
+
+def write_private(path, data):
+    """Atomically replace path with data, mode 0600, in a 0700 directory."""
+    import tempfile
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".utp-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def load_update_state():
+    state = dict(UPDATE_DEFAULTS)
+    try:
+        with open(update_state_path(), encoding="utf-8") as handle:
+            stored = json.loads(handle.read(16384))
+    except (OSError, ValueError, RecursionError):
+        return state
+    if isinstance(stored, dict):
+        for key, default in UPDATE_DEFAULTS.items():
+            value = stored.get(key, default)
+            if (value is None and default is None) or isinstance(
+                    value, str if default is None else type(default)):
+                state[key] = value
+    return state
+
+
+def save_update_state(state):
+    write_private(update_state_path(), json.dumps(state, sort_keys=True).encode())
+
+
+def log_update(message):
+    """Append one line to the automatic-install log, keeping it under UPDATE_LOG_LIMIT."""
+    path = update_log_path()
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    line = f"{stamp} {CONTROL_CHARS_RE.sub(' ', message)[:1000]}\n".encode()
+    try:
+        with open(path, "rb") as handle:
+            old = handle.read()
+    except OSError:
+        old = b""
+    write_private(path, (old + line)[-UPDATE_LOG_LIMIT:])
+
+
+def fetch_latest_release():
+    """One anonymous GET of the public latest-release record: (stable version or None, notes)."""
+    from urllib.request import Request, urlopen
+    repo = UPDATE_REPO_URL.split("github.com/", 1)[1]
+    url = os.environ.get("UTP_UPDATE_API") or f"https://api.github.com/repos/{repo}/releases/latest"
+    request = Request(url, headers={
+        "User-Agent": UPDATE_USER_AGENT, "Accept": "application/vnd.github+json",
+    })
+    with urlopen(request, timeout=UPDATE_TIMEOUT) as response:
+        release = json.loads(response.read(UPDATE_MAX_BYTES))
+    if not isinstance(release, dict):
+        raise UpdateError("the release record is not a JSON object")
+    version = parse_version(release.get("tag_name"))
+    if version is None or release.get("draft") or release.get("prerelease"):
+        return None, ""
+    notes = release.get("body")
+    return ".".join(map(str, version)), notes if isinstance(notes, str) else ""
+
+
+def refresh_update_state(state):
+    """Check now, record the latest stable version or the failure cause; return the notes."""
+    notes = ""
+    state["checkedAt"] = int(time.time())
+    try:
+        state["latest"], notes = fetch_latest_release()
+        state["error"] = None
+    except Exception as exc:
+        state["error"] = describe_error(exc)
+    save_update_state(state)
+    return notes
+
+
+def update_checks_silenced():
+    """Automatic checks stay off when opted out, in CI, under an agent and off a terminal."""
+    for name in ("UTP_NO_UPDATE_CHECK", "CI", "CLAUDECODE"):
+        if os.environ.get(name, "").strip().lower() not in ("", "0", "false"):
+            return True
+    return not all(stream is not None and stream.isatty() for stream in (sys.stdout, sys.stderr))
+
+
+def current_client():
+    return os.path.realpath(__file__)
+
+
+def client_manager(path):
+    """Who updates this copy: None for a standalone file, else (owner, command or None)."""
+    managed_root = os.path.realpath(os.path.expanduser("~/.ultraterm")) + os.sep
+    if path.startswith(managed_root) or ".app/Contents/" in path:
+        return ("UltraTerm", None)
+    root = os.path.dirname(os.path.dirname(os.path.dirname(path)))
+    if (path.endswith(os.sep + os.path.join("clients", "python", "utp"))
+            and os.path.exists(os.path.join(root, ".git"))):
+        return ("git", ["git", "-C", root, "pull", "--ff-only"])
+    return None
+
+
+def update_notice(latest, manager):
+    import shlex
+    command = shlex.join(manager[1]) if manager else "utp update"
+    automatic = "" if manager else "turn on automatic updates: utp update --auto on · "
+    return (f"utp {latest} available (you have {CLIENT_VERSION}) · run: {command}",
+            f"{automatic}skip: utp update --skip")
+
+
+def start_update_check():
+    """Start the daily check beside the user's command; None when checks are off here."""
+    if update_checks_silenced():
+        return None
+    manager = client_manager(current_client())
+    if manager and manager[1] is None:
+        return None  # UltraTerm's own copy updates with UltraTerm
+    import threading
+    result = {}
+
+    def check():
+        try:
+            state = load_update_state()
+            if state["checks"]:
+                if not 0 <= time.time() - state["checkedAt"] < UPDATE_INTERVAL:
+                    refresh_update_state(state)
+                result["state"] = state
+        except Exception:
+            pass  # a failed check must never add noise to the user's command
+
+    thread = threading.Thread(target=check, daemon=True)
+    try:
+        thread.start()
+    except RuntimeError:
+        return None
+    return thread, result
+
+
+def finish_update_check(pending):
+    """After a successful command: print the notice, or start an opted-in install."""
+    thread, result = pending
+    thread.join(UPDATE_TIMEOUT)
+    state = result.get("state")
+    try:
+        latest = state and state["latest"]
+        if not is_newer(latest) or state["skip"] == latest or (
+                state["notifiedVersion"] == latest
+                and 0 <= time.time() - state["notifiedAt"] < UPDATE_INTERVAL):
+            return
+        state["notifiedVersion"], state["notifiedAt"] = latest, int(time.time())
+        save_update_state(state)  # before the installer starts, so it can record a failure
+        manager = client_manager(current_client())
+        if state["auto"] and manager is None and state["installFailed"] != latest:
+            start_auto_install()
+            return
+        first, second = update_notice(latest, manager)
+        plain = os.environ.get("NO_COLOR") or os.environ.get("TERM", "dumb") == "dumb"
+        print(first, file=sys.stderr)
+        print(second if plain else f"\033[2m{second}\033[0m", file=sys.stderr)
+    except Exception:
+        pass
+
+
+def start_auto_install():
+    """A detached, low-priority installer; it logs to the bounded update log."""
+    subprocess.Popen(
+        [sys.executable, current_client(), "update", "--auto-install"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def download_release_file(version, name):
+    from urllib.request import Request, urlopen
+    repo = UPDATE_REPO_URL.split("github.com/", 1)[1]
+    base = os.environ.get("UTP_UPDATE_DOWNLOAD") or f"https://raw.githubusercontent.com/{repo}"
+    url = f"{base}/v{version}/clients/python/{name}"
+    request = Request(url, headers={"User-Agent": UPDATE_USER_AGENT})
+    with urlopen(request, timeout=UPDATE_DOWNLOAD_TIMEOUT) as response:
+        data = response.read(UPDATE_MAX_BYTES + 1)
+    if len(data) > UPDATE_MAX_BYTES:
+        raise UpdateError(f"{name} is larger than {UPDATE_MAX_BYTES} bytes")
+    return data
+
+
+def verified_client(version):
+    """Download release `version` and verify it against its SHA256SUMS before any swap."""
+    import hashlib
+    client = download_release_file(version, "utp")
+    sums = download_release_file(version, "SHA256SUMS").decode("utf-8", "replace")
+    expected = None
+    for line in sums.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1].lstrip("*") in ("utp", "clients/python/utp"):
+            expected = fields[0].lower()
+    if expected is None:
+        raise UpdateError("SHA256SUMS has no entry for utp")
+    if hashlib.sha256(client).hexdigest() != expected:
+        raise UpdateError("checksum mismatch")
+    found = CLIENT_VERSION_LINE_RE.search(client)
+    if found is None or found.group(1).decode("utf-8", "replace") != version:
+        raise UpdateError(f"the downloaded client is not version {version}")
+    return client
+
+
+def install_client(version, target):
+    """Verify, then swap atomically, keeping exactly one rollback at <client>.previous."""
+    import shutil
+    import tempfile
+    client = verified_client(version)
+    mode = stat.S_IMODE(os.stat(target).st_mode)
+    with tempfile.TemporaryDirectory(prefix="utp-update-", dir=os.path.dirname(target)) as work:
+        staged, backup = os.path.join(work, "utp"), os.path.join(work, "previous")
+        with open(staged, "wb") as handle:
+            handle.write(client)
+        shutil.copyfile(target, backup)
+        for path in (staged, backup):
+            os.chmod(path, mode)
+        os.replace(backup, target + ".previous")
+        os.replace(staged, target)
+    return target + ".previous"
+
+
+def remove_rollback(after_success):
+    """Drop <client>.previous once the installed client ran successfully, or after 7 days."""
+    previous = current_client() + ".previous"
+    try:
+        made = os.path.getmtime(previous)
+        if (after_success and made < PROCESS_STARTED) or time.time() - made > ROLLBACK_MAX_AGE:
+            os.unlink(previous)
+    except OSError:
+        pass
+
+
+def ask(question, default):
+    try:
+        answer = input(question).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return False
+    return answer in ("y", "yes") or (default and answer == "")
+
+
+def run_auto_install():
+    try:
+        os.nice(10)
+    except (AttributeError, OSError):
+        pass
+    state = load_update_state()
+    latest = state["latest"]
+    if not is_newer(latest) or client_manager(current_client()):
+        return 0
+    try:
+        install_client(latest, current_client())
+    except Exception as exc:
+        cause = describe_error(exc)
+        state.update(installFailed=latest, installError=cause, notifiedVersion=None)
+        save_update_state(state)
+        log_update(f"automatic install of utp {latest} failed: {cause}")
+        return 1
+    state.update(installFailed=None, installError=None)
+    save_update_state(state)
+    log_update(f"installed utp {latest}; it applies on the next run")
+    return 0
+
+
+def run_update(args) -> int:
+    target = current_client()
+    manager = client_manager(target)
+    state = load_update_state()
+    if args.auto_install:
+        return run_auto_install()
+    if args.rollback:
+        if not os.path.isfile(target + ".previous"):
+            print("utp update: no previous client to restore", file=sys.stderr)
+            return 1
+        os.replace(target + ".previous", target)
+        state["skip"] = CLIENT_VERSION  # the version just removed is not offered again
+        save_update_state(state)
+        print(f"restored the previous client; utp {CLIENT_VERSION} is skipped")
+        return 0
+    if args.auto == "status":
+        print("automatic updates: " + ("on" if state["auto"] else "off"))
+        if state["installFailed"]:
+            print(f"last automatic install failed: {state['installError']}")
+        return 0
+    if args.auto == "on":
+        state.update(auto=True, autoAsked=True, installFailed=None, installError=None)
+        save_update_state(state)
+        print("automatic updates: on")
+        return 0
+    if args.auto == "off":
+        for path in (update_state_path(), update_log_path()):
+            if os.path.exists(path):
+                os.unlink(path)
+        if not state["checks"]:
+            save_update_state({**UPDATE_DEFAULTS, "checks": False, "autoAsked": True})
+        else:
+            try:
+                os.rmdir(update_dir())
+            except OSError:
+                pass
+        print("automatic updates: off; update state removed")
+        return 0
+    if args.checks:
+        if args.checks != "status":
+            state["checks"] = args.checks == "on"
+            save_update_state(state)
+        print("update checks: " + ("on" if state["checks"] else "off"))
+        return 0
+    if args.skip and is_newer(state["latest"]) and not state["error"]:
+        notes = ""  # skip what the notice showed, without another request
+    else:
+        notes = refresh_update_state(state)
+    if state["error"]:
+        print(f"utp update: check failed: {state['error']}", file=sys.stderr)
+        return 1
+    latest = state["latest"]
+    if not is_newer(latest):
+        print(f"utp {CLIENT_VERSION} is current")
+        return 0
+    if args.skip:
+        state["skip"] = latest
+        save_update_state(state)
+        print(f"utp {latest} skipped; a newer release will notify again")
+        return 0
+    print(f"utp {CLIENT_VERSION} → {latest}")
+    lines = [CONTROL_CHARS_RE.sub("", line).strip()[:160] for line in notes.splitlines()]
+    for line in [line for line in lines if line][:6]:
+        print("  " + line)
+    if args.check:
+        return 10
+    if manager and manager[1] is None:
+        print(f"utp update: this client is managed by {manager[0]}; update {manager[0]} instead",
+              file=sys.stderr)
+        return 1
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive and not ask(f"Install {latest} now? [Y/n] ", default=True):
+        return 0
+    if manager:
+        return subprocess.call(manager[1])
+    try:
+        install_client(latest, target)
+    except Exception as exc:
+        print(f"utp update: {describe_error(exc)}; the installed client is unchanged",
+              file=sys.stderr)
+        return 1
+    print(f"installed utp {latest}; undo with: utp update --rollback")
+    if interactive and not state["auto"] and not state["autoAsked"]:
+        state.update(auto=ask("Install future updates automatically? [y/N] ", default=False),
+                     autoAsked=True)
+        save_update_state(state)
+    return 0
 
 
 def normalize_report_items(values: list[str], name: str) -> list[str]:
@@ -716,13 +1132,13 @@ def run_report_hook(args: argparse.Namespace) -> None:
     run_hook("report", payload)
 
 
-def main() -> None:
+def run_command() -> None:
     parser = argparse.ArgumentParser(
         prog="utp",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version="2.8.4")
+    parser.add_argument("--version", action="version", version=CLIENT_VERSION)
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("diagnose", help="read-only aggregate control socket health (JSON)")
     sub.add_parser("list", help="list attached terminals")
@@ -869,10 +1285,37 @@ def main() -> None:
         action="store_true",
         help="assert that the user explicitly authorized deletion",
     )
+    update_parser = sub.add_parser("update", help="check for or install a newer client (local only)")
+    update_actions = update_parser.add_mutually_exclusive_group()
+    update_actions.add_argument(
+        "--check", action="store_true",
+        help="report only: exit 0 current, 10 update available, 1 check failed",
+    )
+    update_actions.add_argument(
+        "--skip", action="store_true", help="hide this version's notice until a newer one",
+    )
+    update_actions.add_argument(
+        "--auto", choices=("on", "off", "status"),
+        help="automatic installation (off by default); off also removes the update state",
+    )
+    update_actions.add_argument(
+        "--checks", choices=("on", "off", "status"),
+        help="automatic daily checks (on by default)",
+    )
+    update_actions.add_argument(
+        "--rollback", action="store_true", help="restore the client replaced by the last update",
+    )
+    update_actions.add_argument("--auto-install", action="store_true", help=argparse.SUPPRESS)
     add_profile_commands(sub)
     add_dial_commands(sub)
 
     args = parser.parse_args()
+
+    if args.cmd == "update":
+        status = run_update(args)
+        if status:
+            raise SystemExit(status)
+        return
 
     if args.cmd == "diagnose":
         response = call({"cmd": "diagnose"})
@@ -1258,6 +1701,22 @@ def require_state_if_waited(response: dict, wait_seconds, until: str = "recorded
     if response.get("waitSatisfied") is not True or response.get(UNTIL_FIELD[until]) is not True:
         state = response.get("deliveryState", "unknown")
         sys.exit(f"utp: receipt did not reach {until} within the wait (now {state}). {response.get('guidance', '')} No message was resent.")
+
+
+def main() -> None:
+    if sys.argv[1:2] == ["update"]:
+        run_command()
+        return
+    pending = start_update_check()
+    try:
+        run_command()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            remove_rollback(after_success=False)
+            raise
+    remove_rollback(after_success=True)
+    if pending:
+        finish_update_check(pending)
 
 
 if __name__ == "__main__":

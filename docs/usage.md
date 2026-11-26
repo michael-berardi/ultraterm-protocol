@@ -11,6 +11,7 @@ The normative contract is [`protocols/v2.md`](../protocols/v2.md). [`protocols/v
 | Client command | Behavior |
 |---|---|
 | `utp diagnose` | Read-only JSON diagnostics: release/wire versions, connection counts and bounded aggregate health counters; no terminal contents or private paths. |
+| `utp update [--check\|--skip\|--auto on\|off\|status\|--checks on\|off\|status\|--rollback]` | Local client update: checksum-verified replacement with one rollback; never uses the socket. See [Updates](updates.md). |
 | `utp list` | Read-only attached slot/session inventory. |
 | `utp inspect --slot N` | Read-only bounded PTY history as plain terminal text; `--no-uc` is a deprecated no-op. |
 | `utp send --slot N TEXT` | Explicit low-level PTY input. |
