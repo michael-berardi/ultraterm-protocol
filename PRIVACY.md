@@ -14,7 +14,7 @@ This document expands the short [Privacy section](README.md#privacy). It describ
 ## Dependencies and installation
 
 - The reference client is one Python 3 script using only the standard library. There are no runtime packages, manifests, plug-ins or third-party imports; it is tested with Python 3.15.
-- The README's single-file install uses `curl` to fetch a URL pinned to release 2.8.5 into `./utp`, then verifies its SHA-256 before you run it. This is the only network fetch in the documented install path; the fetched bytes are the checked client and no installer identifier is retained.
+- The README's single-file install uses `curl` to fetch a URL pinned to release 2.8.5 into `./utp`, then verifies its SHA-256 before you run it. This is the only network fetch in the single-file install path (a source install fetches the repository with `git clone` instead); the fetched bytes are the checked client and no installer identifier is retained.
 - A source install uses `git clone`, which writes a checkout containing the client, protocol specifications, documentation and tests. Run the client from that checkout; no symlink or PATH change is required. UltraTerm may also manage its own copy at `~/.ultraterm/bin/utp`.
 - README rendering loads no remote badges or scripts. Local checks use synthetic fixtures and disposable sockets; they do not require a running UltraTerm app.
 

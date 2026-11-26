@@ -82,10 +82,10 @@ than the default 10-second exchange.
 
 ## Privacy
 
-At runtime UTP talks only to the same-user Unix socket at `~/.ultraterm/utp.sock`.
-It sends nothing over the network and uses only Python's standard library.
-The client writes no files or logs and keeps no history, tokens or telemetry.
-No update checks run, so there is nothing to opt out of.
+At runtime UTP talks only to the same-user Unix socket at `~/.ultraterm/utp.sock`; it has no telemetry.
+Installing downloads the client from GitHub; after that the client sends nothing over the network, though a report hook you install may.
+The client writes no files, logs, history or tokens; delete the `utp` file or checkout to remove it.
+No update checks run, so there is nothing to opt out of; update by downloading a newer release.
 See [PRIVACY.md](PRIVACY.md) for server, packet, hook and installer state.
 
 ## Security
