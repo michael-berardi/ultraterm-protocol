@@ -58,8 +58,8 @@ TECHNICAL_IDENTITY: tuple = ()
 SHIPPED_DIRS = ("protocols", "clients", "examples", "docs")
 
 # Shipped documentation at the repository root. SECURITY.md is included so a personal
-# reporting URL cannot return either.
-SHIPPED_DOCS = ("README.md", "SECURITY.md")
+# reporting URL cannot return either; PRIVACY.md documents shipped behavior.
+SHIPPED_DOCS = ("README.md", "PRIVACY.md", "SECURITY.md")
 
 SKIP_SUFFIXES = {".pyc", ".pyo", ".so", ".dylib"}
 

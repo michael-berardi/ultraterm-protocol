@@ -6,9 +6,13 @@ All notable changes are documented here. This project follows Keep a Changelog a
 
 ### Added
 
-- README `Privacy` section describing the local-only transport, the absence of telemetry, local files, user-owned report hooks and configured model providers.
+- `PRIVACY.md` with local-only protocol facts, dependency and installer facts, and a local-write table giving contents, lifetime, cleanup and deletion for installer files, server routes, handoff packets, report hooks, examples and test fixtures.
 - The install snippet verifies a pinned SHA-256 of the downloaded client before running it. No remote badges are loaded when rendering the README.
-- `tests/test_privacy.py` fails if telemetry/analytics packages or endpoints, HTTP client imports, internet sockets or remote README badges are reintroduced.
+- `tests/test_privacy.py` fails if telemetry/analytics packages or endpoints, HTTP client imports, internet sockets, remote README badges, client-side file/log writes or an overlong README `Privacy` section are reintroduced.
+
+### Changed
+
+- README `Privacy` is now five short lines with a link to `PRIVACY.md`; update status stays one true line with its opt-out statement.
 
 ## [2.8.4] - 2026-11-15
 

@@ -70,6 +70,7 @@ can supply the harness instead.
 ## Reference
 
 - [Commands, handoffs, reports and recovery](docs/usage.md)
+- [Privacy and local state](PRIVACY.md)
 - [Normative v2 specification](protocols/v2.md) and [frozen v1 contract](protocols/v1.md)
 - `utp --help` and `utp COMMAND --help` for client flags
 - [Changelog](CHANGELOG.md)
@@ -81,27 +82,11 @@ than the default 10-second exchange.
 
 ## Privacy
 
-The client sends nothing over the network. Each command talks only to the local
-Unix socket at `~/.ultraterm/utp.sock`; without a command it does nothing. There
-is no telemetry, analytics, crash reporting, update check or install ID. The
-client writes no files and keeps no history, logs or tokens.
-
-UltraTerm's server is a separate app. It documents storing session-to-manager
-routes in `~/.ultraterm/manager-map.json`. Handoff packets are files you create
-under `/tmp`; the client accepts only a regular file you own with no group or
-other access.
-
-`utp report` and `utp redact` pass your text or file path to a user-owned local
-executable at `~/.ultraterm/report-hook` (override with `UTP_REPORT_HOOK`), and
-only when you pass `--user-authorized`. That hook owns the destination and any
-credentials; if it delivers to a chat service, that service receives what you
-asked it to send. Native messages you send through UltraTerm go to agent hosts
-you configured; their model providers receive the prompts you send them. Text
-reports reject credential-shaped values before they reach the hook.
-
-To delete local UTP data: stop UltraTerm, remove `~/.ultraterm/manager-map.json`,
-remove your `/tmp` handoff packets, and remove any audit or log files your own
-report hook wrote. The client itself keeps no other state.
+At runtime UTP talks only to the same-user Unix socket at `~/.ultraterm/utp.sock`.
+It sends nothing over the network and uses only Python's standard library.
+The client writes no files or logs and keeps no history, tokens or telemetry.
+No update checks run, so there is nothing to opt out of.
+See [PRIVACY.md](PRIVACY.md) for server, packet, hook and installer state.
 
 ## Security
 
